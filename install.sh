@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 PREFIX="${HOME}/.zsh/functions"
-REPO_RAW="https://raw.githubusercontent.com/<you>/git-worktrees/main"
+REPO_RAW="https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main"
 
 mkdir -p "$PREFIX"
 curl -fsSL "$REPO_RAW/scripts/wtnew" -o "$PREFIX/wtnew.zsh"

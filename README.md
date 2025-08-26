@@ -8,7 +8,7 @@ Simple shell helpers for Git worktrees:
 ## Install
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/<you>/git-worktrees/main/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/install.sh)"
 ```
 
 Usage
