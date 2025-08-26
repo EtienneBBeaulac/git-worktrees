@@ -1,4 +1,4 @@
-# wtsi: create/open a Git worktree for a new or existing branch
+# wtnew: create/open a Git worktree for a new or existing branch
 # macOS + zsh/bash friendly. Requires: git, (optional) fzf
 wtnew() {
   local new_branch base_ref repo default_dir wt_dir
@@ -15,7 +15,7 @@ wtnew() {
       --app)     open_app="$2"; shift 2;;
       -h|--help)
         cat <<'USAGE'
-Usage: wtsi [options]
+Usage: wtnew [options]
   -n, --name   Branch name (new or existing)
   -b, --base   Base ref (e.g., origin/main) when creating a brand-new branch
   -d, --dir    Worktree directory
@@ -26,7 +26,7 @@ Notes:
   - If the branch exists only on origin → local tracking branch is created.
   - If the branch does not exist anywhere → new branch off --base (or picked interactively).
 Debug:
-  - Set WTSI_DEBUG=1 to print branch/base lists and counts.
+  - Set WTNEW_DEBUG=1 to print branch/base lists and counts.
 USAGE
         return 0;;
       *) echo "Unknown option: $1"; return 2;;
@@ -37,8 +37,8 @@ USAGE
   git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
   command -v fzf >/dev/null || FZF_MISSING=1
 
-  echo "🔄  Fetching origin…"
-  git fetch --prune --tags --quiet origin
+  echo "🔄  Fetching remotes…"
+  git fetch --all --prune --tags --quiet || true
 
   # -------- branch name (fzf with free-typing) --------
   if [[ -z $new_branch ]]; then
@@ -49,7 +49,7 @@ USAGE
         | awk '$0 !~ /->/ && $0 != "HEAD" && $0 != "origin/HEAD" {print}' \
         | sort -u
       )"
-      if [[ -n $WTSI_DEBUG ]]; then
+      if [[ -n $WTNEW_DEBUG ]]; then
         echo "DBG branches count: $(printf "%s\n" "$all_branches" | sed '/^$/d' | wc -l)" >&2
         printf "%s\n" "$all_branches" >&2
       fi
@@ -60,7 +60,7 @@ USAGE
       out="$(printf "%s\n" "$all_branches" \
         | fzf --height=40% --reverse \
               --prompt="🆕  Branch (type to create OR pick existing): " \
-              --preview '[[ -n {} ]] && git log --oneline -n 20 --decorate --graph --color=always {} || echo "➕ New branch"' \
+              --preview 'git rev-parse --verify -q {} >/dev/null && git log --oneline -n 20 --decorate --graph --color=always {} || echo "➕ New branch"' \
               --preview-window=right,60% \
               --print-query)" || { echo "❌ No branch chosen"; return 1; }
 
@@ -87,9 +87,13 @@ USAGE
   new_branch="$sane_branch"
 
   # existence checks
-  local local_exists=0 remote_exists=0
+  local local_exists=0
   git show-ref --verify --quiet "refs/heads/$new_branch" && local_exists=1
-  git show-ref --verify --quiet "refs/remotes/origin/$new_branch" && remote_exists=1
+  # detect remote branch on any remote
+  local remote_exists=0 remote_name=
+  remote_name="$(git for-each-ref --format='%(refname:short)' "refs/remotes/*/$new_branch" \
+               | awk -F/ 'NF>=3{print $2; exit}')"  # first matching remote
+  [[ -n "$remote_name" ]] && remote_exists=1
 
   # -------- base ref selection (only for brand-new branches) --------
   if (( !local_exists && !remote_exists )); then
@@ -107,7 +111,7 @@ USAGE
         | awk '$0 !~ /->/ && $0 != "HEAD" && $0 != "origin/HEAD" {print}' \
         | sort -u
       )"
-      if [[ -n $WTSI_DEBUG ]]; then
+      if [[ -n $WTNEW_DEBUG ]]; then
         echo "DBG base list count: $(printf "%s\n" "$branch_list" | sed '/^$/d' | wc -l)" >&2
         printf "%s\n" "$branch_list" >&2
       fi
@@ -119,7 +123,7 @@ USAGE
         base_ref="$(printf "%s\n" "$branch_list" \
           | fzf --height=40% --reverse \
                 --prompt="⛓  Base ref: " \
-                --preview '[[ -n {} ]] && git log --oneline -n 30 --decorate --graph --color=always {}' \
+                --preview 'git rev-parse --verify -q {} >/dev/null && git log --oneline -n 30 --decorate --graph --color=always {}' \
                 --preview-window=right,60%)"
       fi
     fi
@@ -146,16 +150,19 @@ USAGE
     git worktree add "$wt_dir" "$new_branch" \
       || { echo "❌ worktree add failed"; return 1; }
   elif (( remote_exists )); then
-    git worktree add -b "$new_branch" "$wt_dir" "origin/$new_branch" \
-      || { echo "❌ worktree add failed"; return 1; }
+    git worktree add -b "$new_branch" "$wt_dir" "${remote_name}/${new_branch}" \
+       --track >/dev/null 2>&1 || { echo "❌ Failed to create worktree"; return 1; }
   else
     git worktree add -b "$new_branch" "$wt_dir" "$base_ref" \
       || { echo "❌ worktree add failed"; return 1; }
   fi
 
   # set upstream to origin/<branch> if remote exists (or if base was origin/*)
-  if (( remote_exists )) || [[ "$base_ref" == origin/* ]]; then
-    (cd "$wt_dir" && git branch --set-upstream-to="origin/$new_branch" >/dev/null 2>&1 || true)
+  if (( remote_exists )); then
+    (cd "$wt_dir" && git branch --set-upstream-to="${remote_name}/${new_branch}" >/dev/null 2>&1 || true)
+  elif [[ "${base_ref}" == */* ]]; then
+    # base was like <remote>/<ref> → set upstream to that
+    (cd "$wt_dir" && git branch --set-upstream-to="$base_ref" >/dev/null 2>&1 || true)
   fi
 
   # submodules (if present)

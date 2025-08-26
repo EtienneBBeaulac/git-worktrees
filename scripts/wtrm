@@ -48,6 +48,10 @@ USAGE
 
   git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
 
+  # Keep remotes up-to-date (optional, consistent with wtnew)
+  echo "🔄  Fetching remotes…"
+  git fetch --all --prune --tags --quiet || true
+
   if (( prune_only )); then
     echo "🧹 Pruning stale worktrees…"
     git worktree prune
