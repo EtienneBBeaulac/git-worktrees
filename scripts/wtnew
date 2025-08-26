@@ -173,5 +173,4 @@ USAGE
   fi
 }
 
-# allow both source-and-use and direct execution
-if [[ "${(%):-%N}" == "$0" ]]; then wtnew "$@"; fi
+# function-only: do not auto-execute when sourced

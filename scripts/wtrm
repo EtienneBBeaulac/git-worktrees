@@ -176,4 +176,4 @@ USAGE
   echo "✅ Done."
 }
 
-if [[ "${(%):-%N}" == "$0" ]]; then wtrm "$@"; fi
+# function-only: do not auto-execute when sourced
