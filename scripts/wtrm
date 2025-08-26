@@ -1,6 +1,17 @@
-#!/usr/bin/env zsh
-set -euo pipefail
-
+# wtrm: safely remove a Git worktree (with fzf picker)
+# Usage:
+#   wtrm                          # pick interactively
+#   wtrm -d /path/to/worktree     # remove by path
+#   wtrm -b feature/xyz           # remove the worktree hosting this branch
+# Options:
+#   -d, --dir <path>          Worktree directory to remove
+#   -b, --branch <name>       Branch whose worktree to remove (if multiple, will prompt)
+#   --delete-branch           Also delete the *local* branch if fully merged into base
+#   --base <ref>              Base to check mergedness (default: origin/main→origin/master→main→master)
+#   --force                   Force removal even if dirty or ahead of upstream
+#   --no-fzf                  Don’t use fzf; prompt fallback if needed
+#   --prune-only              Just run 'git worktree prune' and exit
+#   -h, --help                Show help
 wtrm() {
   local target_dir target_branch delete_branch=0 force=0 base_ref="" no_fzf=0 prune_only=0
   local FZF_MISSING=
@@ -17,20 +28,18 @@ wtrm() {
       -h|--help)
         cat <<'USAGE'
 wtrm: safely remove a Git worktree.
-
-Usage:
-  wtrm                          # pick interactively (fzf)
-  wtrm -d /path/to/worktree     # remove by path
-  wtrm -b feature/x             # remove the worktree hosting this branch
-
+Examples:
+  wtrm
+  wtrm -d ../repo-feature-x
+  wtrm -b feature/x --delete-branch
 Options:
-  -d, --dir <path>        Worktree directory to remove
-  -b, --branch <name>     Target branch (prompts if multiple)
-  --delete-branch         Also delete the local branch if fully merged
-  --base <ref>            Base ref for merged check (default: origin/main→origin/master→main→master)
-  --force                 Force removal even if dirty or ahead of upstream
-  --no-fzf                Don’t use fzf; prompt fallback
-  --prune-only            Only run 'git worktree prune' and exit
+  -d, --dir <path>       Worktree directory to remove
+  -b, --branch <name>    Branch whose worktree to remove (prompts if multiple)
+  --delete-branch        Delete the local branch after removal if fully merged
+  --base <ref>           Base ref for merged check (default: origin/main→origin/master→main→master)
+  --force                Force removal even if dirty or ahead of upstream
+  --no-fzf               Don’t use fzf for selection
+  --prune-only           Only run 'git worktree prune' and exit
 USAGE
         return 0;;
       *) echo "Unknown option: $1"; return 2;;
@@ -38,10 +47,20 @@ USAGE
   done
 
   git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
-  if (( prune_only )); then echo "🧹 Pruning…"; git worktree prune; return $?; fi
+
+  if (( prune_only )); then
+    echo "🧹 Pruning stale worktrees…"
+    git worktree prune
+    return $?
+  fi
 
   command -v fzf >/dev/null || FZF_MISSING=1
 
+  # --- Build worktree table: path | branch | head ---
+  # git worktree list --porcelain emits blocks:
+  # worktree /path
+  # HEAD <sha>
+  # branch refs/heads/<name>   (or "branch (detached)")
   local wt_table
   wt_table="$(
     git worktree list --porcelain \
@@ -58,41 +77,46 @@ USAGE
         }
       '
   )"
+
   [[ -z "$wt_table" ]] && { echo "❌ No worktrees found."; return 1; }
 
-  local candidates="$wt_table"
-  if [[ -n ${target_branch:-} ]]; then
-    candidates="$(printf "%s
-" "$wt_table" | awk -F'|' -v b="$target_branch" '$2==b')"
-    [[ -z "$candidates" ]] && { echo "❌ No worktree for branch '$target_branch'."; return 1; }
+  # If target_branch provided, filter candidates
+  local candidates
+  if [[ -n "$target_branch" ]]; then
+    candidates="$(printf "%s\n" "$wt_table" | awk -F'|' -v b="$target_branch" '$2==b')"
+    if [[ -z "$candidates" ]]; then
+      echo "❌ No worktree found for branch '$target_branch'."
+      return 1
+    fi
+  else
+    candidates="$wt_table"
   fi
 
+  # If target_dir provided, select that; else pick interactively or prompt
   local picked_path picked_branch picked_head
-  if [[ -n ${target_dir:-} ]]; then
+  if [[ -n "$target_dir" ]]; then
     picked_path="$target_dir"
-    picked_branch="$(printf "%s
-" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
-    picked_head="$(printf "%s
-" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
+    # derive branch for that path
+    picked_branch="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
     [[ -z "$picked_branch" ]] && { echo "❌ Not a registered worktree: $picked_path"; return 1; }
+    picked_head="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
   else
+    # Prepare a nice display: "branch   path"
     local display
-    display="$(printf "%s
-" "$candidates" | awk -F'|' '{printf "%-40s  %s\n", $2, $1}')"
+    display="$(printf "%s\n" "$candidates" \
+      | awk -F'|' '{printf "%-40s  %s\n", $2, $1}')"
+
     if (( no_fzf )) || [[ -n $FZF_MISSING ]]; then
       echo "🧭 Select a worktree to remove:"
-      printf "%s
-" "$display"
-      printf "Choice (type full path): "; read -r picked_path
+      printf "%s\n" "$display"
+      printf "Choice (type full path): "
+      read -r picked_path
       [[ -z "$picked_path" ]] && { echo "❌ No selection."; return 1; }
-      picked_branch="$(printf "%s
-" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
-      picked_head="$(printf "%s
-" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
+      picked_branch="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
+      picked_head="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
     else
       local pick_out
-      pick_out="$(printf "%s
-" "$display" \
+      pick_out="$(printf "%s\n" "$display" \
         | fzf --height=40% --reverse \
               --prompt="🧹 Remove worktree: " \
               --preview '
@@ -109,64 +133,87 @@ USAGE
               ' \
               --preview-window=right,60%)" || { echo "❌ No selection."; return 1; }
       picked_path="$(printf "%s" "$pick_out" | awk '{print $NF}')"
-      picked_branch="$(printf "%s
-" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
-      picked_head="$(printf "%s
-" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
+      picked_branch="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
+      picked_head="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
     fi
   fi
 
   [[ -z "$picked_path" ]] && { echo "❌ Could not determine worktree path."; return 1; }
-  [[ "$picked_path" == "$(pwd)" || "$(pwd)"/ == "$picked_path"/* ]] && { echo "❌ You are inside '$picked_path'. cd elsewhere."; return 1; }
+  [[ "$picked_path" == "$(pwd)" || "$(pwd)"/ == "$picked_path"/* ]] && {
+    echo "❌ You are currently inside '$picked_path'. cd elsewhere first."; return 1;
+  }
 
-  # dirty?
+  # --- Safety checks in that worktree ---
+  # 1) Dirty?
   local dirty
-  dirty="$(git -C "$picked_path" status --porcelain --untracked-files=all 2>/dev/null || true)"
+  dirty="$(git -C "$picked_path" status --porcelain --untracked-files=all 2>/dev/null)"
   if [[ -n "$dirty" && $force -eq 0 ]]; then
-    echo "❌ Uncommitted/untracked changes. Use --force to remove anyway."
+    echo "❌ Worktree has uncommitted/untracked changes. Use --force to remove anyway."
     return 1
   fi
 
-  # ahead of upstream?
-  local upstream ahead behind
+  # 2) Ahead of upstream?
+  local ahead=0 behind=0 upstream=""
   upstream="$(git -C "$picked_path" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)"
   if [[ -n "$upstream" ]]; then
-    read -r behind ahead <<<"$(git -C "$picked_path" rev-list --left-right --count "${upstream}...HEAD" 2>/dev/null || echo "0 0")"
+    # count ahead/behind
+    local lr
+    lr="$(git -C "$picked_path" rev-list --left-right --count "${upstream}...HEAD" 2>/dev/null || echo "0 0")"
+    behind="$(echo "$lr" | awk '{print $1}')"   # commits the branch is behind the upstream
+    ahead="$(echo  "$lr" | awk '{print $2}')"   # commits ahead of upstream
     if (( ahead > 0 && force == 0 )); then
-      echo "❌ Ahead of '$upstream' by $ahead commit(s). Push or use --force."
+      echo "❌ Branch '$picked_branch' is ahead of '$upstream' by $ahead commit(s). Push or use --force."
       return 1
     fi
   else
-    (( force == 0 )) && { echo "❌ No upstream set. Push or use --force."; return 1; }
+    # no upstream set—be conservative unless forced
+    if (( force == 0 )); then
+      echo "❌ No upstream for '$picked_branch'. Set upstream/push first, or use --force."
+      return 1
+    fi
   fi
 
-  echo "🗑  Removing worktree: $picked_path  (branch: $picked_branch)"
-  git worktree remove ${force:+--force} "$picked_path" || { echo "❌ Failed to remove worktree."; return 1; }
-  echo "🧹 Pruning stale entries…"; git worktree prune
+  # --- Remove the worktree ---
+  echo "🗑  Removing worktree:"
+  echo "    Path:   $picked_path"
+  echo "    Branch: $picked_branch"
+  git worktree remove "${force:+--force}" "$picked_path" || {
+    echo "❌ Failed to remove worktree."; return 1;
+  }
 
+  echo "🧹 Pruning stale entries…"
+  git worktree prune
+
+  # --- Optionally delete the local branch (if merged) ---
   if (( delete_branch )); then
+    # only delete local branches, never detached
     if [[ -n "$picked_branch" && "$picked_branch" != "(detached)" ]]; then
+      # don't delete if any other worktree still uses this branch
       local still_used
       still_used="$(git worktree list --porcelain | awk -v b="$picked_branch" '
-        /^worktree /{path=$2}
-        /^branch /{br=$0; sub(/^branch /,"",br); sub(/^refs\/heads\//,"",br); if (br==b) print path}
-      ')"
+          /^worktree /{path=$2}
+          /^branch /{
+            br=$0; sub(/^branch /,"",br); sub(/^refs\/heads\//,"",br);
+            if (br==b) print path
+          }')"
       if [[ -n "$still_used" ]]; then
-        echo "ℹ️  Branch still used in another worktree; skipping delete."
+        echo "ℹ️  Branch '$picked_branch' still used by another worktree; skipping branch delete."
       else
-        if [[ -z ${base_ref:-} ]]; then
+        # determine base ref for mergedness
+        if [[ -z "$base_ref" ]]; then
           for guess in origin/main origin/master main master; do
             if git rev-parse --verify -q "$guess" >/dev/null; then base_ref="$guess"; break; fi
           done
         fi
-        if [[ -z ${base_ref:-} ]]; then
-          echo "⚠️  No base ref to check mergedness; skipping branch delete."
+        if [[ -z "$base_ref" ]]; then
+          echo "⚠️  No base ref found to check mergedness; skipping branch delete."
         else
+          # Check mergedness: if branch tip is reachable from base
           if git merge-base --is-ancestor "refs/heads/$picked_branch" "$base_ref"; then
             echo "🧨 Deleting local branch '$picked_branch' (merged into $base_ref)…"
             git branch -d "$picked_branch" || true
           else
-            echo "⚠️  Branch not merged into $base_ref; skipping branch delete."
+            echo "⚠️  Branch '$picked_branch' is not fully merged into $base_ref; skipping branch delete."
           fi
         fi
       fi
@@ -175,5 +222,3 @@ USAGE
 
   echo "✅ Done."
 }
-
-# function-only: do not auto-execute when sourced
