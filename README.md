@@ -12,11 +12,12 @@ Simple shell helpers for Git worktrees:
 ```
 
 Usage
-
+```bash
 wtnew
 wtnew -n feature/x -b origin/main --no-open
 wtrm
 wtrm -d ../repo-feature-x --delete-branch
+```
 
 Requirements
 	•	git
