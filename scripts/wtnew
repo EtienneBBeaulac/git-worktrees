@@ -65,7 +65,10 @@ USAGE
       out="$(printf "%s\n" "$all_branches" \
         | fzf --height=40% --reverse \
               --prompt="🆕  Branch (type to create OR pick existing): " \
-              --preview 'git rev-parse --verify -q {} >/dev/null && git log --oneline -n 20 --decorate --graph --color=always {} || echo "➕ New branch"' \              --preview-window=right,60% \
+              --preview 'if [ -n "{}" ] && git rev-parse --verify -q {} >/dev/null; then \
+                            git log --oneline -n 20 --decorate --graph --color=always {}; \
+                          else echo "➕ New branch"; fi' \
+              --preview-window=right,60% \
               --print-query)" || { echo "❌ No branch chosen"; return 1; }
 
       query="$(printf "%s" "$out" | head -n1)"
@@ -137,7 +140,10 @@ USAGE
         base_ref="$(printf "%s\n" "$branch_list" \
           | fzf --height=40% --reverse \
                 --prompt="⛓  Base ref: " \
-                --preview 'git rev-parse --verify -q {} >/dev/null && git log --oneline -n 30 --decorate --graph --color=always {}' \                --preview-window=right,60%)"
+                --preview 'if [ -n "{}" ] && git rev-parse --verify -q {} >/dev/null; then \
+                             git log --oneline -n 30 --decorate --graph --color=always {}; \
+                           else echo "invalid ref"; fi' \
+                --preview-window=right,60%)"
       fi
     fi
     [[ -z $base_ref ]] && { echo "❌ No base ref selected"; return 1; }
