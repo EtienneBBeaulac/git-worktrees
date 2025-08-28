@@ -1,0 +1,21 @@
+#!/usr/bin/env zsh
+# Wrapper to run wtopen as a CLI when installed to PATH.
+# It sources the sibling ../wtopen function file and invokes wtopen.
+
+# Resolve this script's directory (zsh-specific):
+script_dir="${0:A:h}"
+script_root="${script_dir}/.."
+
+# Prefer function file next to the wrappers; fallback to absolute path if present.
+if [[ -f "${script_root}/wtopen" ]]; then
+  source "${script_root}/wtopen"
+elif [[ -f "${script_root}/../wtopen" ]]; then
+  source "${script_root}/../wtopen"
+else
+  echo "wtopen function file not found. Expected at ${script_root}/wtopen" >&2
+  exit 2
+fi
+
+wtopen "$@"
+
+

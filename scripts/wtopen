@@ -1,0 +1,258 @@
+# wtopen: find and open an existing Git worktree for a given branch
+# macOS + zsh/bash friendly. Requires: git, (optional) fzf
+wtopen() {
+  emulate -L zsh
+  setopt local_options pipefail
+
+  # Source common helpers if available
+  local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
+  [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
+
+  local branch_ref="" open_ide=1 open_app="${WT_APP:-Android Studio}"
+  local force_fzf=0 list_only=0 dry_run=0 prune_stale=0 exact_match=0 prefer_cwd=0
+  local FZF_MISSING=
+
+  # -------- flags (optional) --------
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<'USAGE'
+Usage: wtopen [branchOrRef] [options]
+  --list         List worktrees with branches and exit
+  --fzf          Force interactive picker even if branch provided
+  --no-open      Do not launch Android Studio (print path only)
+  --app NAME     App name to open (default: "Android Studio")
+  --prune-stale  Prune stale/prunable worktrees and exit
+  --dry-run      Show which directory would be opened; do not open
+  --exact        Require exact branch match (no shortname normalization)
+  --cwd          Prefer matches from the current repo family if multiple
+  -h, --help     Show help
+Debug:
+  - Set WTOPEN_DEBUG=1 to print internal lists.
+USAGE
+        return 0;;
+      --list)        list_only=1; shift;;
+      --fzf)         force_fzf=1; shift;;
+      --no-open)     open_ide=0; shift;;
+      --app)         open_app="$2"; shift 2;;
+      --prune-stale) prune_stale=1; shift;;
+      --dry-run)     dry_run=1; shift;;
+      --exact)       exact_match=1; shift;;
+      --cwd)         prefer_cwd=1; shift;;
+      *)
+        if [[ -z $branch_ref ]]; then branch_ref="$1"; else echo "Unknown arg: $1"; return 2; fi
+        shift;;
+    esac
+  done
+
+  # -------- sanity checks --------
+  git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
+  command -v fzf >/dev/null || FZF_MISSING=1
+
+  # Option: prune stale
+  if (( prune_stale )); then
+    echo "🧹  Pruning stale worktrees…"
+    git worktree prune -v || true
+    return 0
+  fi
+
+  # Fallback if wt_short_ref is not available from common lib
+  if ! typeset -f wt_short_ref >/dev/null 2>&1; then
+    wt_short_ref() {
+      local sel="$1" short=""
+      if [[ "$sel" =~ ^refs/heads/(.+)$ ]]; then
+        short="${match[1]}"
+      elif [[ "$sel" =~ ^refs/remotes/([^/]+)/(.+)$ ]]; then
+        short="${match[2]}"
+      elif [[ "$sel" =~ ^remotes/([^/]+)/(.+)$ ]]; then
+        short="${match[2]}"
+      else
+        short="$sel"
+      fi
+      printf "%s" "$short"
+    }
+  fi
+
+  # Normalize requested branch
+  local requested_branch=""
+  if [[ -n $branch_ref && $exact_match -eq 0 ]]; then
+    if git remote | grep -Fxq "${branch_ref%%/*}" && [[ "$branch_ref" == */* ]]; then
+      requested_branch="${branch_ref#*/}"
+    else
+      requested_branch="$(wt_short_ref "$branch_ref")"
+    fi
+  else
+    requested_branch="$branch_ref"
+  fi
+
+  # -------- parse worktrees (porcelain) into lines: BRANCH\tDIR --------
+  local wt_lines
+  wt_lines="$(
+    git worktree list --porcelain \
+    | awk '
+        BEGIN{dir="";branch="";det=0;pr=0}
+        /^worktree /{if(dir!=""){print dir"\t"branch"\t"det"\t"pr};dir=$2;branch="";det=0;pr=0;next}
+        /^branch /  {branch=$2;next}
+        /^detached/ {det=1;next}
+        /^prunable/ {pr=1;next}
+        /^$/        {if(dir!=""){print dir"\t"branch"\t"det"\t"pr;dir="";branch="";det=0;pr=0}}
+        END         {if(dir!=""){print dir"\t"branch"\t"det"\t"pr}}
+      '
+  )"
+
+  # Build selectable list: only non-detached entries with a branch
+  local selectable=""
+  local IFS=$'\n'
+  for line in ${(f)wt_lines}; do
+    local dir="${line%%\t*}"
+    local rest="${line#*\t}"
+    local br="${rest%%\t*}"
+    local rest2="${rest#*\t}"
+    local det="${rest2%%\t*}"
+    local pr="${rest2#*\t}"
+    [[ "$det" == "1" ]] && continue
+    [[ -z "$br" ]] && continue
+    local shortbr; shortbr="$(wt_short_ref "$br")"
+    selectable+="$shortbr\t$dir\t$pr\n"
+  done
+
+  if [[ -n ${WT_DEBUG:-${WTOPEN_DEBUG:-}} ]]; then
+    echo "DBG selectable count: $(printf "%s" "$selectable" | sed '/^$/d' | wc -l)" >&2
+    printf "%s" "$selectable" >&2
+  fi
+
+  # If --list, print and exit
+  if (( list_only )); then
+    printf "%s" "$selectable" | sed -E 's/\t/  \t/g'
+    return 0
+  fi
+
+  # Find matches if branch requested
+  local matches=""
+  if [[ -n $requested_branch ]]; then
+    local l
+    for l in ${(f)selectable}; do
+      local sbr="${l%%\t*}"
+      local path="${l#*\t}"; path="${path%%\t*}"
+      if [[ "$sbr" == "$requested_branch" ]]; then
+        matches+="$sbr\t$path\n"
+      fi
+    done
+  fi
+
+  # If prefer_cwd and multiple matches, prefer those sharing git-common-dir
+  if [[ -n $matches && $prefer_cwd -eq 1 ]]; then
+    local my_common; my_common="$(git rev-parse --git-common-dir 2>/dev/null)"
+    local preferred="" others=""
+    local m
+    for m in ${(f)matches}; do
+      local mp="${m#*\t}"
+      local common; common="$(git -C "$mp" rev-parse --git-common-dir 2>/dev/null || true)"
+      if [[ -n "$my_common" && -n "$common" && "$common" == "$my_common" ]]; then
+        preferred+="$m\n"
+      else
+        others+="$m\n"
+      fi
+    done
+    if [[ -n $preferred ]]; then
+      matches="$preferred"
+    else
+      matches="$matches"
+    fi
+  fi
+
+  local target_dir="" target_branch=""
+
+  if [[ -n $requested_branch && -n $matches && $force_fzf -eq 0 ]]; then
+    # If single match, pick it; if multiple, fall back to fzf if present
+    local count; count="$(printf "%s" "$matches" | sed '/^$/d' | wc -l | tr -d ' ')"
+    if [[ "$count" == "1" ]]; then
+      target_branch="${matches%%\t*}"
+      target_dir="${matches#*\t}"
+    else
+      if [[ -z $FZF_MISSING ]]; then
+        local out
+        out="$(printf "%s" "$matches" \
+          | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
+                --prompt="🔎  Pick worktree for $requested_branch: " \
+                --with-nth=1,2 --delimiter='\t' \
+                --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
+                --preview-window=right,60%)"
+        [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
+        target_branch="${out%%\t*}"; target_dir="${out#*\t}"
+      else
+        echo "❌ Multiple worktrees match '$requested_branch'. Re-run with --fzf to choose."
+        return 1
+      fi
+    fi
+  elif [[ -n $requested_branch && -z $matches && $force_fzf -eq 0 ]]; then
+    echo "❌ Branch '$requested_branch' not in any worktree"
+    return 1
+  fi
+
+  # If still no target and either --fzf or no branch was given, show picker of all
+  if [[ -z $target_dir ]]; then
+    if [[ -n $FZF_MISSING ]]; then
+      echo "📝  Worktrees (branch -> dir):"
+      printf "%s" "$selectable" | awk -F"\t" '{printf "- %s  \t%s\n", $1, $2}'
+      printf "Pick a branch: "; read -r requested_branch
+      [[ -z $requested_branch ]] && { echo "❌ No branch chosen"; return 1; }
+      local found=0
+      local l
+      for l in ${(f)selectable}; do
+        local sbr="${l%%\t*}"; local path="${l#*\t}"; path="${path%%\t*}"
+        if [[ "$sbr" == "$requested_branch" ]]; then
+          target_branch="$sbr"; target_dir="$path"; found=1; break
+        fi
+      done
+      (( found )) || { echo "❌ Branch '$requested_branch' not in any worktree"; return 1; }
+    else
+      local out
+      out="$(printf "%s" "$selectable" \
+        | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
+              --prompt="📂  Open worktree (type to filter): " \
+              --with-nth=1,2 --delimiter='\t' \
+              --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
+              --preview-window=right,60%)"
+      [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
+      target_branch="${out%%\t*}"; target_dir="${out#*\t}"; target_dir="${target_dir%%\t*}"
+    fi
+  fi
+
+  [[ -z $target_dir ]] && { echo "❌ Could not resolve target worktree"; return 1; }
+
+  if (( dry_run )); then
+    echo "DRY-RUN: would open $target_dir (branch $target_branch)"
+    return 0
+  fi
+
+  if (( open_ide )); then
+    echo "🚀  Opening Android Studio…"
+    if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
+      wt_open_in_android_studio "$target_dir" "$open_app"
+    else
+      if command -v studio >/dev/null 2>&1; then
+        studio "$target_dir" >/dev/null 2>&1 || true
+      else
+        if [[ -d "$target_dir/.idea" ]]; then
+          open -a "$open_app" "$target_dir/.idea" >/dev/null 2>&1 || true
+        elif [[ -f "$target_dir/settings.gradle" || -f "$target_dir/settings.gradle.kts" ]]; then
+          local sg="$target_dir/settings.gradle"
+          [[ -f "$target_dir/settings.gradle.kts" ]] && sg="$target_dir/settings.gradle.kts"
+          open -a "$open_app" "$sg" >/dev/null 2>&1 || true
+        elif [[ -f "$target_dir/build.gradle" || -f "$target_dir/build.gradle.kts" ]]; then
+          local bg="$target_dir/build.gradle"
+          [[ -f "$target_dir/build.gradle.kts" ]] && bg="$target_dir/build.gradle.kts"
+          open -a "$open_app" "$bg" >/dev/null 2>&1 || true
+        else
+          open -a "$open_app" "$target_dir" >/dev/null 2>&1 || true
+        fi
+      fi
+    fi
+    echo "📂  If no window appears, open it manually via File → Open… → $target_dir"
+  else
+    echo "$target_dir"
+  fi
+}
+
+

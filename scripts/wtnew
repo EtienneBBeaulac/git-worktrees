@@ -4,9 +4,14 @@ wtnew() {
   emulate -L zsh
   setopt local_options pipefail
 
+  # Source common helpers if available
+  local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
+  [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
+
   local new_branch base_ref repo default_dir wt_dir
-  local open_ide=1 open_app="Android Studio"
-  local explicit_remote do_push=0
+  local open_ide=1 open_app="${WT_APP:-Android Studio}"
+  local explicit_remote do_push=0 inside_ok=0
+  local prefer_reuse=0 reuse_slot=0 skip_create=0
   local FZF_MISSING=
 
   # -------- flags (optional) --------
@@ -19,6 +24,8 @@ wtnew() {
       --no-open) open_ide=0; shift;;
       --app)     open_app="$2"; shift 2;;
       --push)    do_push=1; shift;;
+      --prefer-reuse) prefer_reuse=1; shift;;
+      --inside-ok) inside_ok=1; shift;;
       -h|--help)
         cat <<'USAGE'
 Usage: wtnew [options]
@@ -29,6 +36,8 @@ Usage: wtnew [options]
   --no-open    Do not launch Android Studio
   --app        App name to open (default: "Android Studio")
   --push       Push new branch to the selected remote and set upstream
+  --prefer-reuse  Prefer reusing an existing worktree slot (clean, safe) over creating a new dir
+  --inside-ok  Allow creating a worktree path inside current repo (unsafe)
 Notes:
   - If the branch exists locally → a worktree is created on that branch.
   - If the branch exists on a remote → local tracking branch is created from that remote.
@@ -40,6 +49,15 @@ USAGE
       *) echo "Unknown option: $1"; return 2;;
     esac
   done
+
+  # Env default: always push new branches if WTNEW_ALWAYS_PUSH is set
+  if (( do_push == 0 )) && [[ -n ${WTNEW_ALWAYS_PUSH:-} ]]; then
+    do_push=1
+  fi
+  # Env default: prefer slot reuse if WTNEW_PREFER_REUSE is set
+  if (( prefer_reuse == 0 )) && [[ -n ${WTNEW_PREFER_REUSE:-} ]]; then
+    prefer_reuse=1
+  fi
 
   # -------- sanity checks --------
   git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
@@ -68,14 +86,14 @@ USAGE
     if [[ -z $FZF_MISSING ]]; then
       local all_branches out query choice
       all_branches="$(_wt__branch_list)"
-      if [[ -n ${WTNEW_DEBUG:-} ]]; then
+      if [[ -n ${WT_DEBUG:-${WTNEW_DEBUG:-}} ]]; then
         echo "DBG branches count: $(printf "%s\n" "$all_branches" | sed '/^$/d' | wc -l)" >&2
         printf "%s\n" "$all_branches" >&2
       fi
       [[ -z "$all_branches" ]] && { echo "❌ No branches found. Try: git fetch --all --prune --tags"; return 1; }
 
       out="$(printf "%s\n" "$all_branches" \
-        | fzf --height=40% --reverse \
+        | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
               --prompt="🆕  Branch (type to create OR pick existing): " \
               --preview 'if [ -n "{}" ] && git rev-parse --verify -q {} >/dev/null; then \
                             git log --oneline -n 20 --decorate --graph --color=always {}; \
@@ -147,7 +165,7 @@ USAGE
     fi
     if [[ -z ${base_ref:-} ]]; then
       local branch_list="$(_wt__branch_list)"
-      if [[ -n ${WTNEW_DEBUG:-} ]]; then
+      if [[ -n ${WT_DEBUG:-${WTNEW_DEBUG:-}} ]]; then
         echo "DBG base list count: $(printf "%s\n" "$branch_list" | sed '/^$/d' | wc -l)" >&2
         printf "%s\n" "$branch_list" >&2
       fi
@@ -157,7 +175,7 @@ USAGE
         printf "⛓  Base ref: "; read -r base_ref
       else
         base_ref="$(printf "%s\n" "$branch_list" \
-          | fzf --height=40% --reverse \
+          | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
                 --prompt="⛓  Base ref: " \
                 --preview 'if [ -n "{}" ] && git rev-parse --verify -q {} >/dev/null; then \
                              git log --oneline -n 30 --decorate --graph --color=always {}; \
@@ -170,13 +188,96 @@ USAGE
       || { echo "❌ Unknown base ref: $base_ref"; return 1; }
   fi
 
+  # -------- reuse existing worktree for this branch if already checked out --------
+  local existing_wt_dir
+  existing_wt_dir="$(git worktree list --porcelain | awk -v b="$new_branch" '
+    /^worktree /{d=$2}
+    /^branch /{
+      br=$0; sub(/^branch /,"",br); sub(/^refs\/heads\//,"",br);
+      if (br==b) print d
+    }' | head -n1)"
+  if [[ -n "$existing_wt_dir" && -d "$existing_wt_dir" ]]; then
+    echo "♻️  Branch already checked out in worktree: $existing_wt_dir"
+    wt_dir="$existing_wt_dir"
+    skip_create=1
+  fi
+
+  # -------- prefer reusing a clean worktree slot (optional) --------
+  if (( skip_create == 0 && prefer_reuse == 1 )); then
+    # Exclude repo root; find clean, non-busy slots
+    local repo_root_reuse; repo_root_reuse="$(git rev-parse --show-toplevel)"
+    local slots=""; local block
+    block="$(git worktree list --porcelain)"
+    local sdir sbr sclean sbusy out lines=""
+    local IFS=$'\n'
+    local d_line
+    # Parse blocks into dir + branch
+    local parsed
+    parsed="$(printf "%s" "$block" | awk '
+      BEGIN{d="";br=""}
+      /^worktree /{if(d!=""){print d"\t"br}; d=$2;br=""; next}
+      /^branch /{br=$0; sub(/^branch /,"",br); sub(/^refs\/heads\//,"",br); next}
+      /^$/       {if(d!=""){print d"\t"br; d="";br=""}}
+      END        {if(d!=""){print d"\t"br}}
+    ')"
+    for d_line in ${(f)parsed}; do
+      sdir="${d_line%%\t*}"; sbr="${d_line#*\t}"
+      [[ -z "$sdir" || "$sdir" == "$repo_root_reuse" ]] && continue
+      # Skip slots already hosting the target branch (handled above) or detached
+      [[ "$sbr" == "$new_branch" || -z "$sbr" ]] && continue
+      # Clean?
+      local dirty; dirty="$(git -C "$sdir" status --porcelain --untracked-files=all 2>/dev/null)"
+      sclean=1; [[ -n "$dirty" ]] && sclean=0
+      # Busy (merge/rebase/cherry-pick)?
+      sbusy=0
+      [[ -e "$sdir/.git/MERGE_HEAD" || -d "$sdir/.git/rebase-merge" || -d "$sdir/.git/rebase-apply" || -e "$sdir/.git/CHERRY_PICK_HEAD" ]] && sbusy=1
+      (( sclean == 1 && sbusy == 0 )) && lines+="$sdir\n"
+    done
+    if [[ -n "$lines" ]]; then
+      local slot_count; slot_count="$(printf "%s" "$lines" | sed '/^$/d' | wc -l | tr -d ' ')"
+      if [[ "$slot_count" == "1" ]]; then
+        wt_dir="$(printf "%s" "$lines" | head -n1)"; reuse_slot=1
+        echo "♻️  Reusing worktree slot: $wt_dir"
+      else
+        if [[ -z $FZF_MISSING ]]; then
+          local out
+          # Build display with branch and status
+          local display; display=""
+          local s; for s in ${(f)lines}; do
+            local curr_br; curr_br="$(git -C "$s" rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)"
+            local st; st="$(git -C "$s" status --porcelain --untracked-files=all 2>/dev/null)"; [[ -n "$st" ]] && st="dirty" || st="clean"
+            display+="$(printf "%-40s  %s\n" "$curr_br" "$s")"
+          done
+          out="$(printf "%s" "$display" \
+            | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
+                  --prompt="♻️  Reuse slot for $new_branch: " \
+                  --preview '
+                      path=$(echo {} | awk "{print $NF}")
+                      if [[ -d "$path" ]]; then
+                        printf "Path: %s\n\n" "$path"
+                        git -C "$path" status -sb --untracked-files=all 2>/dev/null
+                        echo
+                        printf "Recent commits:\n"
+                        git -C "$path" log --oneline -n 15 --decorate --graph --color=always 2>/dev/null
+                      fi
+                  ' \
+                  --preview-window=right,60%)" || true
+          if [[ -n "$out" ]]; then
+            wt_dir="$(printf "%s" "$out" | awk '{print $NF}')"; reuse_slot=1
+            echo "♻️  Reusing worktree slot: $wt_dir"
+          fi
+        fi
+      fi
+    fi
+  fi
+
   # -------- worktree dir (sibling of repo root, never nested) --------
   local repo_root repo parent_dir
   repo_root="$(git rev-parse --show-toplevel)"
   repo="$(basename "$repo_root")"
   parent_dir="$(dirname "$repo_root")"
   default_dir="${parent_dir}/${repo}-${new_branch//\//-}"
-  if [[ -z ${wt_dir:-} ]]; then
+  if (( skip_create == 0 && reuse_slot == 0 )) && [[ -z ${wt_dir:-} ]]; then
     printf "📂  Worktree dir [%s]: " "$default_dir"; read -r wt_dir
     wt_dir=${wt_dir:-$default_dir}
   fi
@@ -185,15 +286,17 @@ USAGE
   local repo_root_abs="${repo_root:A}"
 
   # Disallow creating a worktree inside the current repository
-  if [[ "$wt_dir_abs" == "$repo_root_abs" || "$wt_dir_abs" == $repo_root_abs/* ]]; then
+  if (( skip_create == 0 && reuse_slot == 0 )) && (( inside_ok == 0 )) && [[ -z ${WTNEW_INSIDE_OK:-} ]] && [[ "$wt_dir_abs" == "$repo_root_abs" || "$wt_dir_abs" == $repo_root_abs/* ]]; then
     echo "❌ Worktree path cannot be inside the current repository: $wt_dir"
     echo "   Pick a path outside, e.g.: $default_dir"
     return 1
   fi
 
-  [[ -e "$wt_dir_abs" ]] && { echo "❌ Path already exists: $wt_dir"; return 1; }
-  if git worktree list --porcelain | awk '/^worktree /{print $2}' | grep -Fxq "$wt_dir_abs"; then
-    echo "❌ Worktree already registered at: $wt_dir"; return 1
+  if (( skip_create == 0 && reuse_slot == 0 )); then
+    [[ -e "$wt_dir_abs" ]] && { echo "❌ Path already exists: $wt_dir"; return 1; }
+    if git worktree list --porcelain | awk '/^worktree /{print $2}' | grep -Fxq "$wt_dir_abs"; then
+      echo "❌ Worktree already registered at: $wt_dir"; return 1
+    fi
   fi
 
   # Use absolute path going forward
@@ -213,55 +316,79 @@ USAGE
     selected_remote="$(git remote | head -n1)"
   fi
 
-  # -------- create worktree (3 cases) --------
-  echo "➕  Creating worktree…"
-  if (( local_exists )); then
-    git worktree add "$wt_dir" "$new_branch" \
-      || { echo "❌ worktree add failed"; return 1; }
-  elif (( remote_exists )); then
-    git worktree add -b "$new_branch" "$wt_dir" "${remote_found}/${new_branch}" \
-      || { echo "❌ worktree add failed"; return 1; }
+  # -------- create or reuse worktree --------
+  if (( skip_create )); then
+    : # nothing to do (already exists for this branch)
+  elif (( reuse_slot )); then
+    echo "♻️  Reusing slot and switching branch…"
+    if (( local_exists )); then
+      git -C "$wt_dir" switch "$new_branch" \
+        || { echo "❌ Failed to switch to $new_branch in $wt_dir"; return 1; }
+    elif (( remote_exists )); then
+      git -C "$wt_dir" switch --track "${remote_found}/${new_branch}" \
+        || git -C "$wt_dir" switch -c "$new_branch" "${remote_found}/${new_branch}" \
+        || { echo "❌ Failed to create tracking branch $new_branch in $wt_dir"; return 1; }
+    else
+      git -C "$wt_dir" switch -c "$new_branch" "$base_ref" \
+        || { echo "❌ Failed to create branch $new_branch from $base_ref in $wt_dir"; return 1; }
+    fi
   else
-    git worktree add -b "$new_branch" "$wt_dir" "$base_ref" \
-      || { echo "❌ worktree add failed"; return 1; }
+    echo "➕  Creating worktree…"
+    if (( local_exists )); then
+      git worktree add "$wt_dir" "$new_branch" \
+        || { echo "❌ worktree add failed"; return 1; }
+    elif (( remote_exists )); then
+      git worktree add -b "$new_branch" "$wt_dir" "${remote_found}/${new_branch}" \
+        || { echo "❌ worktree add failed"; return 1; }
+    else
+      git worktree add -b "$new_branch" "$wt_dir" "$base_ref" \
+        || { echo "❌ worktree add failed"; return 1; }
+    fi
   fi
 
   # -------- upstream setup / push (optional) --------
-  if (( remote_exists )); then
-    (cd "$wt_dir" && git branch --set-upstream-to="${remote_found}/${new_branch}" >/dev/null 2>&1 || true)
-  else
-    # If no remote branch exists and --push requested, create it and set upstream
-    if (( do_push )) && [[ -n "$selected_remote" ]]; then
-      echo "🌐  Pushing to $selected_remote and setting upstream…"
-      (cd "$wt_dir" && git push -u "$selected_remote" "$new_branch" >/dev/null 2>&1 || true)
+  if (( !skip_create )); then
+    if (( remote_exists )); then
+      (cd "$wt_dir" && git branch --set-upstream-to="${remote_found}/${new_branch}" >/dev/null 2>&1 || true)
+    else
+      # If no remote branch exists and --push requested, create it and set upstream
+      if (( do_push )) && [[ -n "$selected_remote" ]]; then
+        echo "🌐  Pushing to $selected_remote and setting upstream…"
+        (cd "$wt_dir" && git push -u "$selected_remote" "$new_branch" >/dev/null 2>&1 || true)
+      fi
     fi
   fi
 
   # submodules (if present)
-  if [[ -f .gitmodules ]] && grep -q 'path = ' .gitmodules 2>/dev/null; then
-    echo "🔁  Updating submodules…"
-    (cd "$wt_dir" && git submodule update --init --recursive --quiet)
+  if (( !skip_create )); then
+    if [[ -f .gitmodules ]] && grep -q 'path = ' .gitmodules 2>/dev/null; then
+      echo "🔁  Updating submodules…"
+      (cd "$wt_dir" && git submodule update --init --recursive --quiet)
+    fi
   fi
 
-  # -------- open IDE (robust macOS chain) --------
+  # -------- open IDE (reuse common helper when available) --------
   if (( open_ide )); then
     echo "🚀  Opening Android Studio…"
-
-    if command -v studio >/dev/null 2>&1; then
-      studio "$wt_dir" >/dev/null 2>&1 || true
+    if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
+      wt_open_in_android_studio "$wt_dir" "$open_app"
     else
-      if [[ -d "$wt_dir/.idea" ]]; then
-        open -a "$open_app" "$wt_dir/.idea" >/dev/null 2>&1 || true
-      elif [[ -f "$wt_dir/settings.gradle" || -f "$wt_dir/settings.gradle.kts" ]]; then
-        local sg="$wt_dir/settings.gradle"
-        [[ -f "$wt_dir/settings.gradle.kts" ]] && sg="$wt_dir/settings.gradle.kts"
-        open -a "$open_app" "$sg" >/dev/null 2>&1 || true
-      elif [[ -f "$wt_dir/build.gradle" || -f "$wt_dir/build.gradle.kts" ]]; then
-        local bg="$wt_dir/build.gradle"
-        [[ -f "$wt_dir/build.gradle.kts" ]] && bg="$wt_dir/build.gradle.kts"
-        open -a "$open_app" "$bg" >/dev/null 2>&1 || true
+      if command -v studio >/dev/null 2>&1; then
+        studio "$wt_dir" >/dev/null 2>&1 || true
       else
-        open -a "$open_app" "$wt_dir" >/dev/null 2>&1 || true
+        if [[ -d "$wt_dir/.idea" ]]; then
+          open -a "$open_app" "$wt_dir/.idea" >/dev/null 2>&1 || true
+        elif [[ -f "$wt_dir/settings.gradle" || -f "$wt_dir/settings.gradle.kts" ]]; then
+          local sg="$wt_dir/settings.gradle"
+          [[ -f "$wt_dir/settings.gradle.kts" ]] && sg="$wt_dir/settings.gradle.kts"
+          open -a "$open_app" "$sg" >/dev/null 2>&1 || true
+        elif [[ -f "$wt_dir/build.gradle" || -f "$wt_dir/build.gradle.kts" ]]; then
+          local bg="$wt_dir/build.gradle"
+          [[ -f "$wt_dir/build.gradle.kts" ]] && bg="$wt_dir/build.gradle.kts"
+          open -a "$open_app" "$bg" >/dev/null 2>&1 || true
+        else
+          open -a "$open_app" "$wt_dir" >/dev/null 2>&1 || true
+        fi
       fi
     fi
     echo "📂  If no window appears, open it manually via File → Open… → $wt_dir"
