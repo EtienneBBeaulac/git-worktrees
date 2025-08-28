@@ -69,10 +69,17 @@ USAGE
                             git log --oneline -n 20 --decorate --graph --color=always {}; \
                           else echo "➕ New branch"; fi' \
               --preview-window=right,60% \
-              --print-query)" || { echo "❌ No branch chosen"; return 1; }
+              --print-query)"
+      local fzf_status=$?
 
       query="$(printf "%s" "$out" | head -n1)"
       choice="$(printf "%s" "$out" | tail -n1)"
+
+      # If user cancelled (Esc/Ctrl-C), fzf returns non-zero and no output
+      if (( fzf_status != 0 )) && [[ -z "$query" && -z "$choice" ]]; then
+        echo "❌ No branch chosen"; return 1
+      fi
+
       if [[ -n "$choice" && "$choice" != "$query" ]]; then
         new_branch="$choice"
       else
