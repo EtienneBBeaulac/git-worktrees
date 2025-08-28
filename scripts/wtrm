@@ -13,6 +13,9 @@
 #   --prune-only              Just run 'git worktree prune' and exit
 #   -h, --help                Show help
 wtrm() {
+  emulate -L zsh
+  setopt local_options pipefail
+
   local target_dir target_branch delete_branch=0 force=0 base_ref="" no_fzf=0 prune_only=0
   local FZF_MISSING=
 
@@ -64,27 +67,34 @@ USAGE
   # git worktree list --porcelain emits blocks:
   # worktree /path
   # HEAD <sha>
-  # branch refs/heads/<name>   (or "branch (detached)")
+  # branch refs/heads/<name>   (or omitted when detached)
   local wt_table
   wt_table="$(
-    git worktree list --porcelain \
-    | awk '
-        BEGIN{path="";head="";br=""}
-        /^worktree /{path=$2}
-        /^HEAD /    {head=$2}
-        /^branch /  {
-          br=$0
-          sub(/^branch /,"",br)
-          if (br ~ /^refs\/heads\//) sub(/^refs\/heads\//,"",br)
-          if (br ~ /^\(detached\)/)   br="(detached)"
+    git worktree list --porcelain |
+    awk '
+      BEGIN { path=""; head=""; br="" }
+      function flush() {
+        if (path != "") {
+          # If no branch recorded for this block, it is detached
+          if (br == "") br="(detached)";
           printf "%s|%s|%s\n", path, br, head
         }
-      '
+      }
+      /^worktree / { flush(); path=$2; head=""; br=""; next }
+      /^HEAD /     { head=$2; next }
+      /^branch /   {
+        br=$0
+        sub(/^branch /,"",br)
+        sub(/^refs\/heads\//,"",br)
+        next
+      }
+      END { flush() }
+    '
   )"
 
   [[ -z "$wt_table" ]] && { echo "❌ No worktrees found."; return 1; }
 
-  # If target_branch provided, filter candidates
+  # If target_branch provided, filter candidates (detached never matches here)
   local candidates
   if [[ -n "$target_branch" ]]; then
     candidates="$(printf "%s\n" "$wt_table" | awk -F'|' -v b="$target_branch" '$2==b')"
@@ -100,15 +110,15 @@ USAGE
   local picked_path picked_branch picked_head
   if [[ -n "$target_dir" ]]; then
     picked_path="$target_dir"
-    # derive branch for that path
+    # derive branch/head for that path
     picked_branch="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
     [[ -z "$picked_branch" ]] && { echo "❌ Not a registered worktree: $picked_path"; return 1; }
     picked_head="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
   else
-    # Prepare a nice display: "branch   path"
+    # Prepare a nice display: "branch[+sha]   path"
     local display
     display="$(printf "%s\n" "$candidates" \
-      | awk -F'|' '{printf "%-40s  %s\n", $2, $1}')"
+      | awk -F'|' '{b=$2; h=$3; if (b=="(detached)") b=b "@" substr(h,1,7); printf "%-40s  %s\n", b, $1}')"
 
     if (( no_fzf )) || [[ -n $FZF_MISSING ]]; then
       echo "🧭 Select a worktree to remove:"
@@ -163,7 +173,7 @@ USAGE
     # count ahead/behind
     local lr
     lr="$(git -C "$picked_path" rev-list --left-right --count "${upstream}...HEAD" 2>/dev/null || echo "0 0")"
-    behind="$(echo "$lr" | awk '{print $1}')"   # commits the branch is behind the upstream
+    behind="$(echo "$lr" | awk '{print $1}')"   # commits behind upstream
     ahead="$(echo  "$lr" | awk '{print $2}')"   # commits ahead of upstream
     if (( ahead > 0 && force == 0 )); then
       echo "❌ Branch '$picked_branch' is ahead of '$upstream' by $ahead commit(s). Push or use --force."
