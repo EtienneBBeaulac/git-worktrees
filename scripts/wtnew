@@ -1,6 +1,9 @@
 # wtnew: create/open a Git worktree for a new or existing branch
 # macOS + zsh/bash friendly. Requires: git, (optional) fzf
 wtnew() {
+  emulate -L zsh
+  setopt local_options pipefail
+
   local new_branch base_ref repo default_dir wt_dir
   local open_ide=1 open_app="Android Studio"
   local FZF_MISSING=
@@ -23,7 +26,7 @@ Usage: wtnew [options]
   --app        App name to open (default: "Android Studio")
 Notes:
   - If the branch exists locally → a worktree is created on that branch.
-  - If the branch exists only on origin → local tracking branch is created.
+  - If the branch exists on a remote → local tracking branch is created from that remote.
   - If the branch does not exist anywhere → new branch off --base (or picked interactively).
 Debug:
   - Set WTNEW_DEBUG=1 to print branch/base lists and counts.
@@ -40,28 +43,29 @@ USAGE
   echo "🔄  Fetching remotes…"
   git fetch --all --prune --tags --quiet || true
 
+  # -------- helper: build list of short refs (no refs/… prefixes) --------
+  _wt__branch_list() {
+    git for-each-ref --format='%(refname:short)' refs/heads refs/remotes \
+    | sed -E 's#^refs/heads/##; s#^refs/remotes/##; s#^remotes/##' \
+    | grep -vE '^(HEAD|.*/HEAD)$' \
+    | sort -u
+  }
+
   # -------- branch name (fzf with free-typing) --------
-  if [[ -z $new_branch ]]; then
+  if [[ -z ${new_branch:-} ]]; then
     if [[ -z $FZF_MISSING ]]; then
       local all_branches out query choice
-      all_branches="$(
-        git branch --all --format='%(refname:short)' \
-        | awk '$0 !~ /->/ && $0 != "HEAD" && $0 != "origin/HEAD" {print}' \
-        | sort -u
-      )"
-      if [[ -n $WTNEW_DEBUG ]]; then
+      all_branches="$(_wt__branch_list)"
+      if [[ -n ${WTNEW_DEBUG:-} ]]; then
         echo "DBG branches count: $(printf "%s\n" "$all_branches" | sed '/^$/d' | wc -l)" >&2
         printf "%s\n" "$all_branches" >&2
       fi
-      if [[ -z "$all_branches" ]]; then
-        echo "❌ No branches found. Try: git fetch --all --prune --tags"; return 1
-      fi
+      [[ -z "$all_branches" ]] && { echo "❌ No branches found. Try: git fetch --all --prune --tags"; return 1; }
 
       out="$(printf "%s\n" "$all_branches" \
         | fzf --height=40% --reverse \
               --prompt="🆕  Branch (type to create OR pick existing): " \
-              --preview 'git rev-parse --verify -q {} >/dev/null && git log --oneline -n 20 --decorate --graph --color=always {} || echo "➕ New branch"' \
-              --preview-window=right,60% \
+              --preview 'git rev-parse --verify -q {} >/dev/null && git log --oneline -n 20 --decorate --graph --color=always {} || echo "➕ New branch"' \              --preview-window=right,60% \
               --print-query)" || { echo "❌ No branch chosen"; return 1; }
 
       query="$(printf "%s" "$out" | head -n1)"
@@ -77,54 +81,63 @@ USAGE
   fi
   [[ -z $new_branch ]] && { echo "❌ Branch name required"; return 1; }
 
-  # sanitize & validate
+  # -------- normalize selection into remote + short branch --------
+  local sel="$new_branch" remote_name="" short_branch=""
+  if [[ "$sel" =~ ^refs/remotes/([^/]+)/(.+)$ ]]; then
+    remote_name="${match[1]}"; short_branch="${match[2]}"
+  elif [[ "$sel" =~ ^remotes/([^/]+)/(.+)$ ]]; then
+    remote_name="${match[1]}"; short_branch="${match[2]}"
+  elif git remote | grep -Fxq "${sel%%/*}" && [[ "$sel" == */* ]]; then
+    remote_name="${sel%%/*}"; short_branch="${sel#*/}"
+  else
+    short_branch="$sel"
+  fi
+  new_branch="$short_branch"
+
+  # sanitize & validate local branch name
   local sane_branch
   sane_branch=$(printf "%s" "$new_branch" \
-    | tr '[:upper:] ' '[:lower:]-' \
-    | sed 's#[^a-z0-9/_\-]##g')
+    | tr ' ' '-' \
+    | sed 's#[^A-Za-z0-9/_\-]##g')
   git check-ref-format --branch "$sane_branch" \
     || { echo "❌ Invalid branch name: $sane_branch"; return 1; }
   new_branch="$sane_branch"
 
-  # existence checks
-  local local_exists=0
+  # -------- existence checks across local + any remote --------
+  local local_exists=0 remote_exists=0 remote_found=""
   git show-ref --verify --quiet "refs/heads/$new_branch" && local_exists=1
-  # detect remote branch on any remote
-  local remote_exists=0 remote_name=
-  remote_name="$(git for-each-ref --format='%(refname:short)' "refs/remotes/*/$new_branch" \
-               | awk -F/ 'NF>=3{print $2; exit}')"  # first matching remote
-  [[ -n "$remote_name" ]] && remote_exists=1
+
+  if [[ -n "$remote_name" ]] && git show-ref --verify --quiet "refs/remotes/$remote_name/$new_branch"; then
+    remote_exists=1; remote_found="$remote_name"
+  else
+    remote_found="$(git for-each-ref --format='%(refname:short)' "refs/remotes/*/$new_branch" | awk -F/ 'NF>=3{print $2; exit}')"
+    [[ -n "$remote_found" ]] && remote_exists=1
+  fi
 
   # -------- base ref selection (only for brand-new branches) --------
   if (( !local_exists && !remote_exists )); then
-    if [[ -z $base_ref ]]; then
+    if [[ -z ${base_ref:-} ]]; then
       for guess in origin/main origin/master main master origin/develop develop; do
         if git rev-parse --verify -q "$guess" >/dev/null; then
           base_ref="$guess"; break
         fi
       done
     fi
-    if [[ -z $base_ref ]]; then
-      local branch_list
-      branch_list="$(
-        git branch --all --format='%(refname:short)' \
-        | awk '$0 !~ /->/ && $0 != "HEAD" && $0 != "origin/HEAD" {print}' \
-        | sort -u
-      )"
-      if [[ -n $WTNEW_DEBUG ]]; then
+    if [[ -z ${base_ref:-} ]]; then
+      local branch_list="$(_wt__branch_list)"
+      if [[ -n ${WTNEW_DEBUG:-} ]]; then
         echo "DBG base list count: $(printf "%s\n" "$branch_list" | sed '/^$/d' | wc -l)" >&2
         printf "%s\n" "$branch_list" >&2
       fi
-      echo "📝  Branches available (pick base):"
       if [[ -n $FZF_MISSING ]]; then
+        echo "📝  Branches available (pick base):"
         printf "%s\n" "$branch_list"
         printf "⛓  Base ref: "; read -r base_ref
       else
         base_ref="$(printf "%s\n" "$branch_list" \
           | fzf --height=40% --reverse \
                 --prompt="⛓  Base ref: " \
-                --preview 'git rev-parse --verify -q {} >/dev/null && git log --oneline -n 30 --decorate --graph --color=always {}' \
-                --preview-window=right,60%)"
+                --preview 'git rev-parse --verify -q {} >/dev/null && git log --oneline -n 30 --decorate --graph --color=always {}' \                --preview-window=right,60%)"
       fi
     fi
     [[ -z $base_ref ]] && { echo "❌ No base ref selected"; return 1; }
@@ -135,7 +148,7 @@ USAGE
   # -------- worktree dir --------
   repo=${PWD##*/}
   default_dir="../${repo}-${new_branch//\//-}"
-  if [[ -z $wt_dir ]]; then
+  if [[ -z ${wt_dir:-} ]]; then
     printf "📂  Worktree dir [%s]: " "$default_dir"; read -r wt_dir
     wt_dir=${wt_dir:-$default_dir}
   fi
@@ -150,18 +163,18 @@ USAGE
     git worktree add "$wt_dir" "$new_branch" \
       || { echo "❌ worktree add failed"; return 1; }
   elif (( remote_exists )); then
-    git worktree add -b "$new_branch" "$wt_dir" "${remote_name}/${new_branch}" \
-       --track >/dev/null 2>&1 || { echo "❌ Failed to create worktree"; return 1; }
+    git worktree add -b "$new_branch" "$wt_dir" "${remote_found}/${new_branch}" \
+      || { echo "❌ worktree add failed"; return 1; }
   else
     git worktree add -b "$new_branch" "$wt_dir" "$base_ref" \
       || { echo "❌ worktree add failed"; return 1; }
   fi
 
-  # set upstream to origin/<branch> if remote exists (or if base was origin/*)
+  # set upstream to <remote>/<branch> if remote exists,
+  # or to base_ref if it looked like <remote>/<ref>
   if (( remote_exists )); then
-    (cd "$wt_dir" && git branch --set-upstream-to="${remote_name}/${new_branch}" >/dev/null 2>&1 || true)
-  elif [[ "${base_ref}" == */* ]]; then
-    # base was like <remote>/<ref> → set upstream to that
+    (cd "$wt_dir" && git branch --set-upstream-to="${remote_found}/${new_branch}" >/dev/null 2>&1 || true)
+  elif [[ "${base_ref:-}" == */* ]]; then
     (cd "$wt_dir" && git branch --set-upstream-to="$base_ref" >/dev/null 2>&1 || true)
   fi
 
@@ -175,25 +188,20 @@ USAGE
   if (( open_ide )); then
     echo "🚀  Opening Android Studio…"
 
-    # Prefer CLI if available (JetBrains Toolbox often installs this)
     if command -v studio >/dev/null 2>&1; then
       studio "$wt_dir" >/dev/null 2>&1 || true
     else
-      # Try opening a project marker first, then fall back to the dir
       if [[ -d "$wt_dir/.idea" ]]; then
         open -a "$open_app" "$wt_dir/.idea" >/dev/null 2>&1 || true
       elif [[ -f "$wt_dir/settings.gradle" || -f "$wt_dir/settings.gradle.kts" ]]; then
-        local sg
-        sg="$wt_dir/settings.gradle"
+        local sg="$wt_dir/settings.gradle"
         [[ -f "$wt_dir/settings.gradle.kts" ]] && sg="$wt_dir/settings.gradle.kts"
         open -a "$open_app" "$sg" >/dev/null 2>&1 || true
       elif [[ -f "$wt_dir/build.gradle" || -f "$wt_dir/build.gradle.kts" ]]; then
-        local bg
-        bg="$wt_dir/build.gradle"
+        local bg="$wt_dir/build.gradle"
         [[ -f "$wt_dir/build.gradle.kts" ]] && bg="$wt_dir/build.gradle.kts"
         open -a "$open_app" "$bg" >/dev/null 2>&1 || true
       else
-        # Last resort: open the folder (no -n; let Studio reuse existing process)
         open -a "$open_app" "$wt_dir" >/dev/null 2>&1 || true
       fi
     fi
