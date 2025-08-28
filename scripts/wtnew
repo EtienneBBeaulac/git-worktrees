@@ -158,17 +158,34 @@ USAGE
       || { echo "❌ Unknown base ref: $base_ref"; return 1; }
   fi
 
-  # -------- worktree dir --------
-  repo=${PWD##*/}
-  default_dir="../${repo}-${new_branch//\//-}"
+  # -------- worktree dir (sibling of repo root, never nested) --------
+  local repo_root repo parent_dir
+  repo_root="$(git rev-parse --show-toplevel)"
+  repo="$(basename "$repo_root")"
+  parent_dir="$(dirname "$repo_root")"
+  default_dir="${parent_dir}/${repo}-${new_branch//\//-}"
   if [[ -z ${wt_dir:-} ]]; then
     printf "📂  Worktree dir [%s]: " "$default_dir"; read -r wt_dir
     wt_dir=${wt_dir:-$default_dir}
   fi
-  [[ -e "$wt_dir" ]] && { echo "❌ Path already exists: $wt_dir"; return 1; }
-  if git worktree list --porcelain | awk '/^worktree /{print $2}' | grep -Fxq "$wt_dir"; then
+  # Normalize to absolute paths for validation
+  local wt_dir_abs="${wt_dir:A}"
+  local repo_root_abs="${repo_root:A}"
+
+  # Disallow creating a worktree inside the current repository
+  if [[ "$wt_dir_abs" == "$repo_root_abs" || "$wt_dir_abs" == $repo_root_abs/* ]]; then
+    echo "❌ Worktree path cannot be inside the current repository: $wt_dir"
+    echo "   Pick a path outside, e.g.: $default_dir"
+    return 1
+  fi
+
+  [[ -e "$wt_dir_abs" ]] && { echo "❌ Path already exists: $wt_dir"; return 1; }
+  if git worktree list --porcelain | awk '/^worktree /{print $2}' | grep -Fxq "$wt_dir_abs"; then
     echo "❌ Worktree already registered at: $wt_dir"; return 1
   fi
+
+  # Use absolute path going forward
+  wt_dir="$wt_dir_abs"
 
   # -------- create worktree (3 cases) --------
   echo "➕  Creating worktree…"
