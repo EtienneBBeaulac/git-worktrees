@@ -72,7 +72,10 @@ _wtnew() {
       ;;
   esac
 }
-compdef _wtnew wtnew
+# Register completion only in interactive shells where compdef is available
+if [[ -o interactive ]] && whence -w compdef >/dev/null 2>&1; then
+  compdef _wtnew wtnew
+fi
 
 _wtopen() {
   local -a opts
@@ -96,7 +99,9 @@ _wtopen() {
       ;;
   esac
 }
-compdef _wtopen wtopen
+if [[ -o interactive ]] && whence -w compdef >/dev/null 2>&1; then
+  compdef _wtopen wtopen
+fi
 
 _wtrm() {
   local -a opts
@@ -122,6 +127,8 @@ _wtrm() {
       ;;
   esac
 }
-compdef _wtrm wtrm
+if [[ -o interactive ]] && whence -w compdef >/dev/null 2>&1; then
+  compdef _wtrm wtrm
+fi
 
 

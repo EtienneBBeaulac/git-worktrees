@@ -18,7 +18,7 @@ Usage
 wtnew
 wtnew -n feature/x -b origin/main --no-open
 wtopen feature/x   # open existing worktree for branch (or picker with no args)
-w tls --fzf --open  # list worktrees and open selected in Android Studio
+wtls --fzf --open  # list worktrees and open selected in Android Studio
 wtrm
 wtrm -d ../repo-feature-x --delete-branch
 ```
