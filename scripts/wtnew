@@ -6,6 +6,7 @@ wtnew() {
 
   local new_branch base_ref repo default_dir wt_dir
   local open_ide=1 open_app="Android Studio"
+  local explicit_remote do_push=0
   local FZF_MISSING=
 
   # -------- flags (optional) --------
@@ -14,16 +15,20 @@ wtnew() {
       -n|--name) new_branch="$2"; shift 2;;
       -b|--base) base_ref="$2"; shift 2;;
       -d|--dir)  wt_dir="$2"; shift 2;;
+      -r|--remote) explicit_remote="$2"; shift 2;;
       --no-open) open_ide=0; shift;;
       --app)     open_app="$2"; shift 2;;
+      --push)    do_push=1; shift;;
       -h|--help)
         cat <<'USAGE'
 Usage: wtnew [options]
   -n, --name   Branch name (new or existing)
   -b, --base   Base ref (e.g., origin/main) when creating a brand-new branch
   -d, --dir    Worktree directory
+  -r, --remote Remote to track/push (default: infer from base or origin)
   --no-open    Do not launch Android Studio
   --app        App name to open (default: "Android Studio")
+  --push       Push new branch to the selected remote and set upstream
 Notes:
   - If the branch exists locally → a worktree is created on that branch.
   - If the branch exists on a remote → local tracking branch is created from that remote.
@@ -42,6 +47,13 @@ USAGE
 
   echo "🔄  Fetching remotes…"
   git fetch --all --prune --tags --quiet || true
+
+  # Validate explicit remote if provided
+  if [[ -n ${explicit_remote:-} ]] && ! git remote | grep -Fxq "$explicit_remote"; then
+    echo "❌ Unknown remote: $explicit_remote"
+    echo "   Available remotes: $(git remote | tr '\n' ' ')"
+    return 1
+  fi
 
   # -------- helper: build list of short refs (no refs/… prefixes) --------
   _wt__branch_list() {
@@ -187,6 +199,20 @@ USAGE
   # Use absolute path going forward
   wt_dir="$wt_dir_abs"
 
+  # -------- choose remote to track/push --------
+  local selected_remote=""
+  if [[ -n ${explicit_remote:-} ]]; then
+    selected_remote="$explicit_remote"
+  elif (( remote_exists )); then
+    selected_remote="$remote_found"
+  elif [[ "${base_ref:-}" == */* ]]; then
+    selected_remote="${base_ref%%/*}"
+  elif git remote | grep -Fxq origin >/dev/null 2>&1; then
+    selected_remote="origin"
+  else
+    selected_remote="$(git remote | head -n1)"
+  fi
+
   # -------- create worktree (3 cases) --------
   echo "➕  Creating worktree…"
   if (( local_exists )); then
@@ -200,12 +226,15 @@ USAGE
       || { echo "❌ worktree add failed"; return 1; }
   fi
 
-  # set upstream to <remote>/<branch> if remote exists,
-  # or to base_ref if it looked like <remote>/<ref>
+  # -------- upstream setup / push (optional) --------
   if (( remote_exists )); then
     (cd "$wt_dir" && git branch --set-upstream-to="${remote_found}/${new_branch}" >/dev/null 2>&1 || true)
-  elif [[ "${base_ref:-}" == */* ]]; then
-    (cd "$wt_dir" && git branch --set-upstream-to="$base_ref" >/dev/null 2>&1 || true)
+  else
+    # If no remote branch exists and --push requested, create it and set upstream
+    if (( do_push )) && [[ -n "$selected_remote" ]]; then
+      echo "🌐  Pushing to $selected_remote and setting upstream…"
+      (cd "$wt_dir" && git push -u "$selected_remote" "$new_branch" >/dev/null 2>&1 || true)
+    fi
   fi
 
   # submodules (if present)
