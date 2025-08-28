@@ -17,7 +17,7 @@
 #   -h, --help                Show help
 wtrm() {
   emulate -L zsh
-  setopt local_options pipefail
+  setopt local_options pipefail no_xtrace
 
   # Source common helpers if available
   local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
