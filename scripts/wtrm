@@ -1,8 +1,9 @@
 # wtrm: safely remove a Git worktree (with fzf picker)
 # Usage:
-#   wtrm                          # pick interactively
-#   wtrm -d /path/to/worktree     # remove by path
-#   wtrm -b feature/xyz           # remove the worktree hosting this branch
+#   wtrm                              # pick interactively
+#   wtrm -d /path/to/worktree         # remove by path
+#   wtrm -b feature/xyz               # remove the worktree hosting this branch
+#   wtrm --rm-detached [--yes]        # bulk remove detached worktrees (confirm unless --yes)
 # Options:
 #   -d, --dir <path>          Worktree directory to remove
 #   -b, --branch <name>       Branch whose worktree to remove (if multiple, will prompt)
@@ -11,30 +12,38 @@
 #   --force                   Force removal even if dirty or ahead of upstream
 #   --no-fzf                  Don’t use fzf; prompt fallback if needed
 #   --prune-only              Just run 'git worktree prune' and exit
+#   --rm-detached             Remove all detached worktrees (bulk)
+#   --yes                     Non-interactive confirm (with --rm-detached)
 #   -h, --help                Show help
 wtrm() {
   emulate -L zsh
   setopt local_options pipefail
 
   local target_dir target_branch delete_branch=0 force=0 base_ref="" no_fzf=0 prune_only=0
+  local rm_detached=0 assume_yes=0
   local FZF_MISSING=
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -d|--dir)    target_dir="$2"; shift 2;;
-      -b|--branch) target_branch="$2"; shift 2;;
+      -d|--dir)        target_dir="$2"; shift 2;;
+      -b|--branch)     target_branch="$2"; shift 2;;
       --delete-branch) delete_branch=1; shift;;
-      --base)      base_ref="$2"; shift 2;;
-      --force)     force=1; shift;;
-      --no-fzf)    no_fzf=1; shift;;
-      --prune-only) prune_only=1; shift;;
+      --base)          base_ref="$2"; shift 2;;
+      --force)         force=1; shift;;
+      --no-fzf)        no_fzf=1; shift;;
+      --prune-only)    prune_only=1; shift;;
+      --rm-detached)   rm_detached=1; shift;;
+      --yes)           assume_yes=1; shift;;
       -h|--help)
         cat <<'USAGE'
 wtrm: safely remove a Git worktree.
+
 Examples:
   wtrm
   wtrm -d ../repo-feature-x
   wtrm -b feature/x --delete-branch
+  wtrm --rm-detached --yes
+
 Options:
   -d, --dir <path>       Worktree directory to remove
   -b, --branch <name>    Branch whose worktree to remove (prompts if multiple)
@@ -43,6 +52,8 @@ Options:
   --force                Force removal even if dirty or ahead of upstream
   --no-fzf               Don’t use fzf for selection
   --prune-only           Only run 'git worktree prune' and exit
+  --rm-detached          Remove all detached worktrees
+  --yes                  Skip confirmation (used with --rm-detached)
 USAGE
         return 0;;
       *) echo "Unknown option: $1"; return 2;;
@@ -75,7 +86,6 @@ USAGE
       BEGIN { path=""; head=""; br="" }
       function flush() {
         if (path != "") {
-          # If no branch recorded for this block, it is detached
           if (br == "") br="(detached)";
           printf "%s|%s|%s\n", path, br, head
         }
@@ -94,6 +104,54 @@ USAGE
 
   [[ -z "$wt_table" ]] && { echo "❌ No worktrees found."; return 1; }
 
+  # --- Bulk removal of detached worktrees ---
+  if (( rm_detached )); then
+    local det_list det_count
+    det_list="$(printf "%s\n" "$wt_table" | awk -F'|' '$2=="(detached)" {printf "%s %s\n", $1, $3}')"
+    det_count="$(printf "%s\n" "$det_list" | sed '/^\s*$/d' | wc -l | tr -d ' ')"
+    if [[ -z "$det_list" ]]; then
+      echo "ℹ️  No detached worktrees found."
+      return 0
+    fi
+
+    echo "🧭 Detached worktrees to remove ($det_count):"
+    printf "%s\n" "$det_list" | awk '{printf "  - %s (HEAD %s)\n", $1, substr($2,1,7)}'
+
+    if (( !assume_yes )); then
+      printf "Proceed? [y/N]: "
+      local ans; read -r ans
+      [[ "$ans" == "y" || "$ans" == "Y" ]] || { echo "❎ Cancelled."; return 1; }
+    fi
+
+    local ok=0 skipped=0 err=0
+    local path sha dirty
+    while read -r path sha; do
+      # skip empty lines
+      [[ -z "$path" ]] && continue
+      dirty="$(git -C "$path" status --porcelain --untracked-files=all 2>/dev/null)"
+      if [[ -n "$dirty" && $force -eq 0 ]]; then
+        echo "⏭️  Skipping dirty detached worktree: $path (use --force to remove)"
+        ((skipped++))
+        continue
+      fi
+      if git worktree remove ${force:+--force} "$path"; then
+        echo "🗑  Removed: $path"
+        ((ok++))
+      else
+        echo "❌ Failed to remove: $path"
+        ((err++))
+      fi
+    done <<<"$det_list"
+
+    echo "🧹 Pruning stale entries…"
+    git worktree prune
+
+    echo "✅ Done. Removed: $ok  Skipped: $skipped  Errors: $err"
+    return $(( err > 0 ? 1 : 0 ))
+  fi
+
+  # --- Single selection flow below ---
+
   # If target_branch provided, filter candidates (detached never matches here)
   local candidates
   if [[ -n "$target_branch" ]]; then
@@ -110,12 +168,11 @@ USAGE
   local picked_path picked_branch picked_head
   if [[ -n "$target_dir" ]]; then
     picked_path="$target_dir"
-    # derive branch/head for that path
     picked_branch="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
     [[ -z "$picked_branch" ]] && { echo "❌ Not a registered worktree: $picked_path"; return 1; }
     picked_head="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
   else
-    # Prepare a nice display: "branch[+sha]   path"
+    # Display: "branch[+sha]   path"
     local display
     display="$(printf "%s\n" "$candidates" \
       | awk -F'|' '{b=$2; h=$3; if (b=="(detached)") b=b "@" substr(h,1,7); printf "%-40s  %s\n", b, $1}')"
@@ -170,7 +227,6 @@ USAGE
   local ahead=0 behind=0 upstream=""
   upstream="$(git -C "$picked_path" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)"
   if [[ -n "$upstream" ]]; then
-    # count ahead/behind
     local lr
     lr="$(git -C "$picked_path" rev-list --left-right --count "${upstream}...HEAD" 2>/dev/null || echo "0 0")"
     behind="$(echo "$lr" | awk '{print $1}')"   # commits behind upstream
@@ -200,9 +256,7 @@ USAGE
 
   # --- Optionally delete the local branch (if merged) ---
   if (( delete_branch )); then
-    # only delete local branches, never detached
     if [[ -n "$picked_branch" && "$picked_branch" != "(detached)" ]]; then
-      # don't delete if any other worktree still uses this branch
       local still_used
       still_used="$(git worktree list --porcelain | awk -v b="$picked_branch" '
           /^worktree /{path=$2}
@@ -213,7 +267,6 @@ USAGE
       if [[ -n "$still_used" ]]; then
         echo "ℹ️  Branch '$picked_branch' still used by another worktree; skipping branch delete."
       else
-        # determine base ref for mergedness
         if [[ -z "$base_ref" ]]; then
           for guess in origin/main origin/master main master; do
             if git rev-parse --verify -q "$guess" >/dev/null; then base_ref="$guess"; break; fi
@@ -222,7 +275,6 @@ USAGE
         if [[ -z "$base_ref" ]]; then
           echo "⚠️  No base ref found to check mergedness; skipping branch delete."
         else
-          # Check mergedness: if branch tip is reachable from base
           if git merge-base --is-ancestor "refs/heads/$picked_branch" "$base_ref"; then
             echo "🧨 Deleting local branch '$picked_branch' (merged into $base_ref)…"
             git branch -d "$picked_branch" || true
