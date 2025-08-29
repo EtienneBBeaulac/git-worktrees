@@ -4,6 +4,7 @@ wtopen() {
   emulate -L zsh
   setopt local_options pipefail
   unsetopt xtrace verbose
+  set +xv 2>/dev/null || true
 
   # Source common helpers if available
   local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
