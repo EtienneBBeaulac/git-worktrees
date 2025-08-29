@@ -134,7 +134,7 @@ USAGE
     | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
           --prompt="📂  Worktrees: " \
           --with-nth=1 --delimiter=$'\t' \
-          --expect=enter,ctrl-o,ctrl-d,ctrl-p,ctrl-n,ctrl-r,ctrl-a \
+          --expect=enter,ctrl-o,ctrl-d,ctrl-p,ctrl-n,ctrl-r,ctrl-a,ctrl-e \
           --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; git -C "$d" status -sb --untracked-files=all 2>/dev/null; echo; git -C "$d" log --oneline -n 15 --decorate --graph --color=always 2>/dev/null; fi' \
           --preview-window=right,60%)" || true)
 
@@ -160,7 +160,28 @@ USAGE
   case "${key:-enter}" in
     enter|ctrl-o)
       if [[ "$enter_default" == "menu" ]]; then
-        echo "Actions menu not yet implemented"; return 0
+        # Open actions menu instead of opening directly
+        local outa
+        outa="$(printf "%s\n" "Open" "Show path" "Remove" "Prune stale" "Set upstream (origin)" \
+          | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
+        case "$outa" in
+          ("Open")
+            typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+              && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
+              || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true;;
+          ("Show path") echo "$sel_path";;
+          ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
+          ("Prune stale") typeset -f wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
+          ("Set upstream (origin)")
+            local b="${sel_branch}"; local remote="origin"
+            if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
+              git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || echo "❌ Failed to set upstream"
+            else
+              echo "ℹ️  Remote $remote/$b not found. Trying push -u…"
+              git -C "$sel_path" push -u "$remote" "$b" || echo "❌ Push failed"
+            fi;;
+        esac
+        return 0
       fi
       typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
         && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
@@ -213,6 +234,14 @@ USAGE
           fi;;
       esac
       ;;
+    ctrl-e)
+      # Toggle Enter default between open and menu, then re-run hub with same view
+      if [[ "$enter_default" == "open" ]]; then
+        WTHUB_ENTER_DEFAULT=menu wt ${include_detached:+--detached} --start list
+      else
+        WTHUB_ENTER_DEFAULT=open wt ${include_detached:+--detached} --start list
+      fi
+      return $?
     *)
       # Default fallback: open
       typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
