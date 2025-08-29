@@ -90,49 +90,27 @@ USAGE
     requested_branch="$branch_ref"
   fi
 
-  # -------- parse worktrees (porcelain) into lines: BRANCH\tDIR --------
-  # Silence stray stderr (e.g., from tracing) during list construction unless debugging
-  local __old_stderr=
-  if [[ -z ${WT_DEBUG:-${WTOPEN_DEBUG:-}} ]]; then
-    exec {__old_stderr}>&2
-    exec 2>/dev/null
-  fi
-  local wt_lines
-  wt_lines="$(
-    git worktree list --porcelain \
-    | awk '
-        BEGIN{dir="";branch="";det=0;pr=0}
-        /^worktree /{if(dir!=""){print dir"\t"branch"\t"det"\t"pr};dir=$2;branch="";det=0;pr=0;next}
-        /^branch /  {branch=$2;next}
-        /^detached/ {det=1;next}
-        /^prunable/ {pr=1;next}
-        /^$/        {if(dir!=""){print dir"\t"branch"\t"det"\t"pr;dir="";branch="";det=0;pr=0}}
-        END         {if(dir!=""){print dir"\t"branch"\t"det"\t"pr}}
-      '
+  # -------- parse worktrees and emit selectable lines (branch\tpath) in awk --------
+  local selectable
+  selectable="$(
+    git worktree list --porcelain 2>/dev/null | awk '
+      BEGIN{d="";b="";det=0}
+      function flush(){
+        if(d!=""){
+          if(b!="" && det==0){
+            gsub(/^refs\/heads\//,"",b);
+            print b "\t" d;
+          }
+          d=""; b=""; det=0;
+        }
+      }
+      /^worktree /{flush(); d=$2; next}
+      /^branch /  {b=$2; next}
+      /^detached/ {det=1; next}
+      /^$/        {flush();}
+      END         {flush();}
+    '
   )"
-
-  # Build selectable list: only non-detached entries with a branch
-  local selectable=""
-  local IFS=$'\n'
-  for line in ${(f)wt_lines}; do
-    local dir="${line%%\t*}"
-    local rest="${line#*\t}"
-    local br="${rest%%\t*}"
-    local rest2="${rest#*\t}"
-    local det="${rest2%%\t*}"
-    local pr="${rest2#*\t}"
-    [[ "$det" == "1" ]] && continue
-    [[ -z "$br" ]] && continue
-    local shortbr; shortbr="$(wt_short_ref "$br")"
-    # Emit clean, compact rows: "branch\t/path"
-    selectable+="$shortbr"$'\t'"$dir"$'\n'
-  done
-
-  # Restore stderr before interactive UI
-  if [[ -n ${__old_stderr:-} ]]; then
-    exec 2>&$__old_stderr
-    exec {__old_stderr}>&-
-  fi
 
   if [[ -n ${WT_DEBUG:-${WTOPEN_DEBUG:-}} ]]; then
     echo "DBG selectable count: $(printf "%s" "$selectable" | sed '/^$/d' | wc -l)" >&2
@@ -149,6 +127,7 @@ USAGE
   local matches=""
   if [[ -n $requested_branch ]]; then
     local l
+    local IFS=$'\n'
     for l in ${(f)selectable}; do
       local sbr="${l%%\t*}"
       local path="${l#*\t}"; path="${path%%\t*}"
@@ -163,6 +142,7 @@ USAGE
     local my_common; my_common="$(git rev-parse --git-common-dir 2>/dev/null)"
     local preferred="" others=""
     local m
+    local IFS=$'\n'
     for m in ${(f)matches}; do
       local mp="${m#*\t}"
       local common; common="$(git -C "$mp" rev-parse --git-common-dir 2>/dev/null || true)"
@@ -217,6 +197,7 @@ USAGE
       [[ -z $requested_branch ]] && { echo "❌ No branch chosen"; return 1; }
       local found=0
       local l
+      local IFS=$'\n'
       for l in ${(f)selectable}; do
         local sbr="${l%%\t*}"; local path="${l#*\t}"; path="${path%%\t*}"
         if [[ "$sbr" == "$requested_branch" ]]; then
