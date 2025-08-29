@@ -44,7 +44,7 @@ fetch "$REPO_RAW/scripts/wt"                 "$PREFIX/wt.zsh"
 
 add_source_line() {
   local needle="$1" line="$2"
-  if grep -q "$needle" "${HOME}/.zshrc"; then
+  if grep -Fq "$needle" "${HOME}/.zshrc"; then
     (( VERBOSE )) && say "~/.zshrc already has: $needle"
   else
     say "Updating ~/.zshrc"

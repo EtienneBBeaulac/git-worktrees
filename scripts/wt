@@ -139,13 +139,7 @@ USAGE
   fi
 
   local out key line
-  out="$(printf "%s" "$selectable" \
-    | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
-          --prompt="📂  Worktrees: " \
-          --with-nth=1 --delimiter=$'\t' \
-          --expect=enter,ctrl-o,ctrl-d,ctrl-p,ctrl-n,ctrl-r,ctrl-a,ctrl-e,ctrl-h \
-          --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; git -C "$d" status -sb --untracked-files=all 2>/dev/null; echo; git -C "$d" log --oneline -n 15 --decorate --graph --color=always 2>/dev/null; fi' \
-          --preview-window=right,60%)" || true)
+  out="$(printf "%s" "$selectable" | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} --prompt='📂  Worktrees: ' --with-nth=1 --delimiter=$'\t' --expect=enter,ctrl-o,ctrl-d,ctrl-p,ctrl-n,ctrl-r,ctrl-a,ctrl-e,ctrl-h --preview 'd=$(printf \"%s\" {} | cut -f2-); if [ -d \"$d\" ]; then echo \"Path: $d\"; echo; git -C \"$d\" status -sb --untracked-files=all 2>/dev/null; echo; git -C \"$d\" log --oneline -n 15 --decorate --graph --color=always 2>/dev/null; fi' --preview-window=right,60%)" || true
 
   key="$(printf "%s" "$out" | head -n1)"
   line="$(printf "%s" "$out" | sed -n '2p')"
@@ -278,6 +272,7 @@ USAGE
         WTHUB_ENTER_DEFAULT=open wt ${include_detached:+--detached} --start list
       fi
       return $?
+      ;;
     ctrl-h)
       cat <<HELP
 wt hub

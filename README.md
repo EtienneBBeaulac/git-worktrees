@@ -6,6 +6,7 @@ Simple shell helpers for Git worktrees:
 - `wtrm`  – safely remove a worktree (fzf preview, guards against uncommitted/unpushed work)
 - `wtopen` – open an existing worktree for a branch (fzf picker, no mutations)
 - `wtls` – list worktrees with status (clean/dirty, ahead/behind) and optional fzf/open
+- `wt`    – hub to list, open, create, and manage worktrees (fzf)
 
 ## Install
 
@@ -15,6 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/
 
 Usage
 ```bash
+wt                 # hub: list-first UI (Enter=open; Ctrl-E toggles actions)
 wtnew
 wtnew -n feature/x -b origin/main --no-open
 wtopen feature/x   # open existing worktree for branch (or picker with no args)
@@ -60,6 +62,16 @@ Env:
 
 Env:
 - `WT_APP`, `WT_FZF_OPTS`, `WT_FZF_HEIGHT`, `WT_DEBUG` (same semantics as above)
+
+## wt (hub) keys and options
+
+- Start: list of worktrees with "➕ New branch…" and optional "🧵 Show detached…"
+- Keys:
+  - Enter: open (or actions when toggled); Ctrl-E toggles Enter between open/menu (persisted)
+  - Ctrl-N: create (chooser: smart reuse / force reuse / new dir)
+  - Ctrl-D: remove; Ctrl-P: prune stale; Ctrl-A: actions; Ctrl-O: open; Ctrl-H: help
+- Flags: `--start list|new`, `--detached`, `--enter-default open|menu`
+- Env: `WTHUB_ENTER_DEFAULT=open|menu`, `WT_TERMINAL_APP` for "Open in terminal"
 
 License
 
