@@ -143,7 +143,7 @@ USAGE
     | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
           --prompt="📂  Worktrees: " \
           --with-nth=1 --delimiter=$'\t' \
-          --expect=enter,ctrl-o,ctrl-d,ctrl-p,ctrl-n,ctrl-r,ctrl-a,ctrl-e \
+          --expect=enter,ctrl-o,ctrl-d,ctrl-p,ctrl-n,ctrl-r,ctrl-a,ctrl-e,ctrl-h \
           --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; git -C "$d" status -sb --untracked-files=all 2>/dev/null; echo; git -C "$d" log --oneline -n 15 --decorate --graph --color=always 2>/dev/null; fi' \
           --preview-window=right,60%)" || true)
 
@@ -235,7 +235,7 @@ USAGE
     ctrl-a)
       # Simple actions menu
       local act outa
-      outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Remove" "Prune stale" "Set upstream (origin)" \
+      outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Remove" "Prune stale" "Set upstream (origin)" \
         | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
       case "$outa" in
         ("Open")
@@ -252,6 +252,8 @@ USAGE
         ("Open in terminal")
           local term_app="${WT_TERMINAL_APP:-iTerm}"
           open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || echo "❌ Could not open terminal";;
+        ("Print cd command")
+          echo "cd '$sel_path'";;
         ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
         ("Prune stale") typeset -f wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
         ("Set upstream (origin)")
@@ -276,6 +278,14 @@ USAGE
         WTHUB_ENTER_DEFAULT=open wt ${include_detached:+--detached} --start list
       fi
       return $?
+    ctrl-h)
+      cat <<HELP
+wt hub
+  Enter: ${enter_default}   (Ctrl-E toggles)
+  Keys:  Ctrl-N new   Ctrl-R new (reuse)   Ctrl-D remove   Ctrl-P prune   Ctrl-A actions   Ctrl-O open   Ctrl-H help
+  Rows:  "➕ New branch…" starts branch-first flow; "🧵 Show detached…" toggles headless entries
+HELP
+      ;;
     *)
       # Default fallback: open
       typeset -f wt_open_in_android_studio >/dev/null 2>&1 \

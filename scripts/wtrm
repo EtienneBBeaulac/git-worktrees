@@ -156,6 +156,7 @@ USAGE
       local fifo; fifo=$(mktemp -u)
       mkfifo "$fifo" || { echo "❌ mkfifo failed"; return 1; }
       exec 9<>"$fifo"; rm -f "$fifo"
+      local results; results="$(mktemp)"
       local i; for i in $(seq 1 $jobs); do echo >&9; done
       while read -r wt_path sha; do
         read -u 9
@@ -163,12 +164,12 @@ USAGE
           if [[ -z "$wt_path" ]]; then echo >&9; exit 0; fi
           local m_dirty; m_dirty="$(git -C "$wt_path" status --porcelain --untracked-files=all 2>/dev/null)"
           if [[ -n "$m_dirty" && $force -eq 0 ]]; then
-            echo "SKIP $wt_path"
+            printf "%s\n" "SKIP $wt_path" >> "$results"
           else
             if git worktree remove ${force:+--force} "$wt_path"; then
-              echo "OK $wt_path"
+              printf "%s\n" "OK $wt_path" >> "$results"
             else
-              echo "ERR $wt_path"
+              printf "%s\n" "ERR $wt_path" >> "$results"
             fi
           fi
           echo >&9
@@ -176,11 +177,15 @@ USAGE
       done <<<"$targets"
       wait
       exec 9>&- 9<&-
-      # summarize from background outputs already printed
-      # Note: outputs already streamed; for concise summary we re-count lines
-      ok=$(printf "%s\n" | wc -l | tr -d ' ')
-      skipped=$(printf "%s\n" | wc -l | tr -d ' ')
-      err=$(printf "%s\n" | wc -l | tr -d ' ')
+      # Print results and summarize
+      while IFS= read -r line; do
+        case "$line" in
+          ("OK "*)    echo "🗑  Removed: ${line#OK }"; ((ok++));;
+          ("SKIP "*)  echo "⏭️  Skipping dirty detached worktree: ${line#SKIP } (use --force to remove)"; ((skipped++));;
+          ("ERR "*)   echo "❌ Failed to remove: ${line#ERR }"; ((err++));;
+        esac
+      done < "$results"
+      rm -f "$results"
     fi
 
     echo "🧹 Pruning stale entries…"
