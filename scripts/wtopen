@@ -114,7 +114,7 @@ USAGE
     [[ "$det" == "1" ]] && continue
     [[ -z "$br" ]] && continue
     local shortbr; shortbr="$(wt_short_ref "$br")"
-    selectable+="$shortbr\t$dir\t$pr\n"
+    selectable+="$shortbr"$'\t'"$dir"$'\t'"$pr"$'\n'
   done
 
   if [[ -n ${WT_DEBUG:-${WTOPEN_DEBUG:-}} ]]; then
@@ -136,7 +136,7 @@ USAGE
       local sbr="${l%%\t*}"
       local path="${l#*\t}"; path="${path%%\t*}"
       if [[ "$sbr" == "$requested_branch" ]]; then
-        matches+="$sbr\t$path\n"
+        matches+="$sbr"$'\t'"$path"$'\n'
       fi
     done
   fi
