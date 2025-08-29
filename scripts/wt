@@ -10,8 +10,17 @@ wt() {
   local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
   [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
 
-  local start_mode="list" include_detached=0 enter_default="${WTHUB_ENTER_DEFAULT:-open}"
+  local start_mode="list" include_detached=0 enter_default="${WTHUB_ENTER_DEFAULT:-}"
   local branch_arg="" FZF_MISSING=
+
+  # Simple config for persistence
+  local cfg_dir="$HOME/.config/git-worktrees" cfg_file="$cfg_dir/hub"
+  if [[ -z ${enter_default:-} ]]; then
+    if [[ -f "$cfg_file" ]]; then
+      enter_default="$(awk -F'=' '/^ENTER_DEFAULT=/{print $2}' "$cfg_file" | tail -n1)"
+    fi
+  fi
+  [[ -z ${enter_default:-} ]] && enter_default="open"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -202,7 +211,19 @@ USAGE
       fi
       ;;
     ctrl-n)
-      typeset -f wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
+      if typeset -f wtnew >/dev/null 2>&1; then
+        # Choose creation mode
+        local mode
+        mode="$(printf "%s\n" "Create (smart reuse)" "Create (force reuse)" "Create (new dir)" \
+          | FZF_DEFAULT_OPTS= command fzf --prompt="➕ New: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
+        case "$mode" in
+          ("Create (force reuse)") wtnew --prefer-reuse;;
+          ("Create (new dir)") WTNEW_PREFER_REUSE= wtnew;;
+          (*) wtnew;;
+        esac
+      else
+        echo "❌ wtnew not available"
+      fi
       ;;
     ctrl-r)
       if typeset -f wtnew >/dev/null 2>&1; then
@@ -237,8 +258,12 @@ USAGE
     ctrl-e)
       # Toggle Enter default between open and menu, then re-run hub with same view
       if [[ "$enter_default" == "open" ]]; then
+        mkdir -p "$cfg_dir" 2>/dev/null || true
+        { printf "%s\n" "ENTER_DEFAULT=menu"; } > "$cfg_file" 2>/dev/null || true
         WTHUB_ENTER_DEFAULT=menu wt ${include_detached:+--detached} --start list
       else
+        mkdir -p "$cfg_dir" 2>/dev/null || true
+        { printf "%s\n" "ENTER_DEFAULT=open"; } > "$cfg_file" 2>/dev/null || true
         WTHUB_ENTER_DEFAULT=open wt ${include_detached:+--detached} --start list
       fi
       return $?

@@ -64,8 +64,8 @@ fi
 # Self-test (non-fatal)
 if (( ! DRY_RUN )); then
   say "Self-test: sourcing functions…"
-  if zsh -fc 'source ~/.zsh/functions/wt-common.zsh; source ~/.zsh/functions/wtnew.zsh; source ~/.zsh/functions/wtopen.zsh; source ~/.zsh/functions/wtrm.zsh; source ~/.zsh/functions/wtls.zsh; typeset -f wtnew wtopen wtrm wtls >/dev/null'; then
-    ok "Commands available: wtnew, wtopen, wtrm, wtls"
+  if zsh -fc 'source ~/.zsh/functions/wt-common.zsh; source ~/.zsh/functions/wtnew.zsh; source ~/.zsh/functions/wtopen.zsh; source ~/.zsh/functions/wtrm.zsh; source ~/.zsh/functions/wtls.zsh; source ~/.zsh/functions/wt.zsh; typeset -f wtnew wtopen wtrm wtls wt >/dev/null'; then
+    ok "Commands available: wt, wtnew, wtopen, wtrm, wtls"
   else
     err "Warning: could not verify commands in a subshell. Try: source ~/.zshrc"
   fi
@@ -76,6 +76,7 @@ say "Installed. Restart your shell or run: source ~/.zshrc"
 if (( ! QUIET )); then
   cat <<HELP
 Commands:
+  wt                                                 # hub: list, open, new, remove (Ctrl-E toggles Enter)
   wtnew -n feature/x -b origin/main --push          # create and open worktree
   wtopen                                             # open existing worktree (fzf)
   wtrm --rm-detached --jobs 6 --yes                  # remove detached worktrees in parallel

@@ -80,6 +80,9 @@ fi
 _wtopen() {
   local -a opts
   opts=(
+    '--start=-'
+    '--detached'
+    '--enter-default=-'
     '--list'
     '--fzf'
     '--no-open'
