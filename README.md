@@ -14,7 +14,19 @@ Simple shell helpers for Git worktrees:
 curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/install.sh | bash
 ```
 
-Usage
+After install, restart your shell or run:
+
+```bash
+source ~/.zshrc
+```
+
+For local/offline testing, you can override downloads with a local repo path:
+
+```bash
+REPO_RAW="file://$PWD" bash install.sh
+```
+
+## Usage
 ```bash
 wt                 # hub: list-first UI (Enter=open; Ctrl-E toggles actions)
 wtnew
@@ -25,9 +37,10 @@ wtrm
 wtrm -d ../repo-feature-x --delete-branch
 ```
 
-Requirements
-	•	git
-	•	fzf (optional, recommended)
+## Requirements
+
+- git
+- fzf (optional, recommended; without it, non-interactive fallbacks are used)
 
 ## wtnew options
 
@@ -72,6 +85,20 @@ Env:
   - Ctrl-D: remove; Ctrl-P: prune stale; Ctrl-A: actions; Ctrl-O: open; Ctrl-H: help
 - Flags: `--start list|new`, `--detached`, `--enter-default open|menu`
 - Env: `WTHUB_ENTER_DEFAULT=open|menu`, `WT_TERMINAL_APP` for "Open in terminal"
+
+## Testing
+
+Run the non-interactive test suite:
+
+```bash
+bash tests/run.sh
+```
+
+## Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/uninstall.sh | bash
+```
 
 License
 

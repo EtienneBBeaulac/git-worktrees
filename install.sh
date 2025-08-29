@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PREFIX="${HOME}/.zsh/functions"
-REPO_RAW="https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main"
+REPO_RAW=${REPO_RAW:-"https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main"}
 
 EMOJI=${EMOJI:-1}
 COLOR=${COLOR:-1}
@@ -44,7 +44,7 @@ fetch "$REPO_RAW/scripts/wt"                 "$PREFIX/wt.zsh"
 
 add_source_line() {
   local needle="$1" line="$2"
-  if grep -Fq "$needle" "${HOME}/.zshrc"; then
+  if [[ -f "${HOME}/.zshrc" ]] && grep -Fq "$needle" "${HOME}/.zshrc"; then
     (( VERBOSE )) && say "~/.zshrc already has: $needle"
   else
     say "Updating ~/.zshrc"
