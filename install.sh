@@ -3,7 +3,6 @@ set -euo pipefail
 
 PREFIX="${HOME}/.zsh/functions"
 REPO_RAW="https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main"
-PREFIX_ESC="${PREFIX//"/\"}"
 
 EMOJI=${EMOJI:-1}
 COLOR=${COLOR:-1}
