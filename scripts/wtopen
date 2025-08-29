@@ -10,8 +10,6 @@ wtopen() {
   local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
   [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
 
-  # Visible verification tag for user to confirm latest version
-  local __WTOPEN_TAG="[wtopen-verify]"
 
   local branch_ref="" open_ide=1 open_app="${WT_APP:-Android Studio}"
   local force_fzf=0 list_only=0 dry_run=0 prune_stale=0 exact_match=0 prefer_cwd=0
@@ -33,7 +31,7 @@ Usage: wtopen [branchOrRef] [options]
   --cwd          Prefer matches from the current repo family if multiple
   -h, --help     Show help
 Debug:
-  - Set WTOPEN_DEBUG=1 to print internal lists.
+  - Set WT_DEBUG=1 to print internal lists.
 USAGE
         return 0;;
       --list)        list_only=1; shift;;
@@ -172,9 +170,9 @@ USAGE
         local out
         out="$(printf "%s" "$matches" \
           | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
-                --prompt="🧭 ${__WTOPEN_TAG} pick: " \
+                --prompt="🔎  Pick worktree: " \
                 --with-nth=1 --delimiter=$'\t' \
-                --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "== wtopen-verify PREVIEW =="; echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
+                --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
                 --preview-window=right,60%)"
         [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
         target_branch="${out%%\t*}"; target_dir="${out#*\t}"
@@ -209,9 +207,9 @@ USAGE
       local out
       out="$(printf "%s" "$selectable" \
         | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
-              --prompt="📂 ${__WTOPEN_TAG} browse: " \
+              --prompt="📂  Open worktree (type to filter): " \
               --with-nth=1 --delimiter=$'\t' \
-              --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "== wtopen-verify PREVIEW =="; echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
+              --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
               --preview-window=right,60%)"
       [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
       target_branch="${out%%\t*}"; target_dir="${out#*\t}"; target_dir="${target_dir%%\t*}"

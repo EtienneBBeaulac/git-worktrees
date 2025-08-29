@@ -75,7 +75,7 @@ if (( ! QUIET )); then
   cat <<HELP
 Commands:
   wtnew -n feature/x -b origin/main --push          # create and open worktree
-  wtopen                                             # [wtopen-verify] browse picker
+  wtopen                                             # open existing worktree (fzf)
   wtrm --rm-detached --jobs 6 --yes                  # remove detached worktrees in parallel
   wtls --fzf --open                                  # list & open worktrees
 HELP
