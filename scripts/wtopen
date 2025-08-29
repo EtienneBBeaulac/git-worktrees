@@ -176,8 +176,8 @@ USAGE
         out="$(printf "%s" "$matches" \
           | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
                 --prompt="🔎  Pick worktree for $requested_branch: " \
-                --with-nth=1,2 --delimiter='\t' \
-                --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
+                --with-nth=1 --delimiter='\t' \
+                --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
                 --preview-window=right,60%)"
         [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
         target_branch="${out%%\t*}"; target_dir="${out#*\t}"
@@ -212,8 +212,8 @@ USAGE
       out="$(printf "%s" "$selectable" \
         | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
               --prompt="📂  Open worktree (type to filter): " \
-              --with-nth=1,2 --delimiter='\t' \
-              --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
+              --with-nth=1 --delimiter='\t' \
+              --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
               --preview-window=right,60%)"
       [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
       target_branch="${out%%\t*}"; target_dir="${out#*\t}"; target_dir="${target_dir%%\t*}"
