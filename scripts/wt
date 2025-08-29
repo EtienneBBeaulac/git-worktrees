@@ -1,0 +1,225 @@
+# wt: hub for listing and acting on Git worktrees
+# macOS + zsh/bash friendly. Requires: git, (optional) fzf
+wt() {
+  emulate -L zsh
+  setopt local_options pipefail
+  unsetopt xtrace verbose
+  set +xv 2>/dev/null || true
+
+  # Source common helpers if available
+  local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
+  [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
+
+  local start_mode="list" include_detached=0 enter_default="${WTHUB_ENTER_DEFAULT:-open}"
+  local branch_arg="" FZF_MISSING=
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --start)
+        start_mode="$2"; shift 2;;
+      --detached)
+        include_detached=1; shift;;
+      --enter-default)
+        enter_default="$2"; shift 2;;
+      -h|--help)
+        cat <<'USAGE'
+Usage: wt [options] [branch]
+  --start list|new        Start in list-first or branch-first mode (default: list)
+  --detached              Include detached/headless worktrees in list
+  --enter-default open|menu  Default Enter behavior (default: open)
+  -h, --help              Show help
+Notes:
+  - Enter opens the selected worktree; on "New branch…" runs creation.
+  - Keys: Ctrl-D remove, Ctrl-P prune stale, Ctrl-N new branch, A actions (TBD).
+USAGE
+        return 0;;
+      --*) echo "Unknown option: $1"; return 2;;
+      *) branch_arg="$1"; shift;;
+    esac
+  done
+
+  git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
+  command -v fzf >/dev/null || FZF_MISSING=1
+
+  # Fast path: wt <branch> auto-resolve
+  if [[ -n $branch_arg ]]; then
+    local br_short="$branch_arg" existing_dir=""
+    # Strip remote prefix if present
+    if git remote | grep -Fxq "${br_short%%/*}" && [[ "$br_short" == */* ]]; then
+      br_short="${br_short#*/}"
+    fi
+    existing_dir="$(git worktree list --porcelain | awk -v b="$br_short" '
+      /^worktree /{d=$2}
+      /^branch /{br=$0; sub(/^branch /,"",br); sub(/^refs\/heads\//,"",br); if (br==b) print d}
+    ' | head -n1)"
+    if [[ -n $existing_dir && -d $existing_dir ]]; then
+      if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
+        echo "🚀  Opening Android Studio…"
+        wt_open_in_android_studio "$existing_dir" "${WT_APP:-Android Studio}"
+      else
+        open -a "${WT_APP:-Android Studio}" "$existing_dir" >/dev/null 2>&1 || true
+      fi
+      return 0
+    else
+      # Fallback to wtnew for creation
+      if typeset -f wtnew >/dev/null 2>&1; then
+        wtnew -n "$br_short"
+        return $?
+      else
+        echo "ℹ️  No existing worktree for '$br_short'. Install wtnew to create."; return 1
+      fi
+    fi
+  fi
+
+  # Branch-first start (reuse wtnew)
+  if [[ "$start_mode" == "new" ]]; then
+    if typeset -f wtnew >/dev/null 2>&1; then
+      wtnew
+      return $?
+    else
+      echo "❌ wtnew not available"; return 1
+    fi
+  fi
+
+  # Build list (branch\tpath). Detached hidden by default.
+  local selectable
+  selectable="$(
+    git worktree list --porcelain 2>/dev/null | awk -v show_det=$include_detached '
+      BEGIN{d="";b="";det=0}
+      function flush(){
+        if(d!=""){
+          if(b!="" && det==0){ gsub(/^refs\/heads\//,"",b); print b "\t" d }
+          else if(det==1 && show_det==1){ print "(detached)\t" d }
+          d=""; b=""; det=0
+        }
+      }
+      /^worktree /{flush(); d=$2; next}
+      /^branch /  {b=$2; next}
+      /^detached/ {det=1; next}
+      /^$/        {flush()}
+      END         {flush()}
+    '
+  )"
+
+  # Prepend New branch row
+  selectable="➕ New branch…"$'\t'$'(create)'$'\n'"$selectable"
+  if (( ! include_detached )); then
+    selectable="🧵 Show detached…"$'\t'$'(toggle)'$'\n'"$selectable"
+  fi
+
+  if [[ -n ${WT_DEBUG:-} ]]; then
+    echo "DBG wt selectable count: $(printf "%s" "$selectable" | sed '/^$/d' | wc -l)" >&2
+  fi
+
+  if [[ -n $FZF_MISSING ]]; then
+    echo "📝  Worktrees (branch -> dir):"
+    printf "%s" "$selectable" | awk -F"\t" '{printf "- %s  \t%s\n", $1, $2}'
+    printf "Pick a branch or 'New branch…': "; local sel; read -r sel
+    [[ -z $sel ]] && { echo "❌ No selection"; return 1; }
+    if [[ "$sel" == "➕ New branch…"* ]]; then
+      typeset -f wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
+      return $?
+    else
+      local path; path="$(printf "%s" "$selectable" | awk -F"\t" -v b="$sel" '$1==b{print $2; exit}')"
+      [[ -z $path ]] && { echo "❌ Unknown selection"; return 1; }
+      typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+        && wt_open_in_android_studio "$path" "${WT_APP:-Android Studio}" \
+        || open -a "${WT_APP:-Android Studio}" "$path" >/dev/null 2>&1 || true
+      return 0
+    fi
+  fi
+
+  local out key line
+  out="$(printf "%s" "$selectable" \
+    | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
+          --prompt="📂  Worktrees: " \
+          --with-nth=1 --delimiter=$'\t' \
+          --expect=enter,ctrl-o,ctrl-d,ctrl-p,ctrl-n,ctrl-r,ctrl-a \
+          --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; git -C "$d" status -sb --untracked-files=all 2>/dev/null; echo; git -C "$d" log --oneline -n 15 --decorate --graph --color=always 2>/dev/null; fi' \
+          --preview-window=right,60%)" || true)
+
+  key="$(printf "%s" "$out" | head -n1)"
+  line="$(printf "%s" "$out" | sed -n '2p')"
+  [[ -z $line ]] && { echo "❌ No selection"; return 1; }
+
+  local sel_branch sel_path
+  sel_branch="${line%%\t*}"; sel_path="${line#*\t}"; sel_path="${sel_path%%\t*}"
+
+  # New branch row
+  if [[ "$sel_branch" == "➕ New branch…" ]]; then
+    typeset -f wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
+    return $?
+  fi
+
+  # Show detached toggle row
+  if [[ "$sel_branch" == "🧵 Show detached…" ]]; then
+    include_detached=1; wt --detached "$@"; return $?
+  fi
+
+  # Map keys
+  case "${key:-enter}" in
+    enter|ctrl-o)
+      if [[ "$enter_default" == "menu" ]]; then
+        echo "Actions menu not yet implemented"; return 0
+      fi
+      typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+        && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
+        || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true
+      ;;
+    ctrl-d)
+      if typeset -f wtrm >/dev/null 2>&1; then
+        wtrm -d "$sel_path"
+      else
+        echo "❌ wtrm not available"
+      fi
+      ;;
+    ctrl-p)
+      if typeset -f wtrm >/dev/null 2>&1; then
+        wtrm --prune-only
+      else
+        git worktree prune -v || true
+      fi
+      ;;
+    ctrl-n)
+      typeset -f wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
+      ;;
+    ctrl-r)
+      if typeset -f wtnew >/dev/null 2>&1; then
+        wtnew --prefer-reuse
+      else
+        echo "❌ wtnew not available"
+      fi
+      ;;
+    ctrl-a)
+      # Simple actions menu
+      local act outa
+      outa="$(printf "%s\n" "Open" "Show path" "Remove" "Prune stale" "Set upstream (origin)" \
+        | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
+      case "$outa" in
+        ("Open")
+          typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+            && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
+            || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true;;
+        ("Show path") echo "$sel_path";;
+        ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
+        ("Prune stale") typeset -f wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
+        ("Set upstream (origin)")
+          local b="${sel_branch}"; local remote="origin"
+          if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
+            git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || echo "❌ Failed to set upstream"
+          else
+            echo "ℹ️  Remote $remote/$b not found. Trying push -u…"
+            git -C "$sel_path" push -u "$remote" "$b" || echo "❌ Push failed"
+          fi;;
+      esac
+      ;;
+    *)
+      # Default fallback: open
+      typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+        && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
+        || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true
+      ;;
+  esac
+}
+
+

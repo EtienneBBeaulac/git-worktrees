@@ -1,0 +1,20 @@
+#!/usr/bin/env zsh
+# Wrapper to run wt as a CLI when installed to PATH.
+# It sources the sibling ../wt function file and invokes wt.
+
+# Resolve this script's directory (zsh-specific):
+script_dir="${0:A:h}"
+script_root="${script_dir}/.."
+
+if [[ -f "${script_root}/wt" ]]; then
+  source "${script_root}/wt"
+elif [[ -f "${script_root}/../wt" ]]; then
+  source "${script_root}/../wt"
+else
+  echo "wt function file not found. Expected at ${script_root}/wt" >&2
+  exit 2
+fi
+
+wt "$@"
+
+

@@ -40,6 +40,7 @@ fetch "$REPO_RAW/scripts/wtrm"               "$PREFIX/wtrm.zsh"
 fetch "$REPO_RAW/scripts/wtopen"             "$PREFIX/wtopen.zsh"
 fetch "$REPO_RAW/scripts/wtls"               "$PREFIX/wtls.zsh"
 fetch "$REPO_RAW/scripts/lib/wt-common.zsh"  "$PREFIX/wt-common.zsh"
+fetch "$REPO_RAW/scripts/wt"                 "$PREFIX/wt.zsh"
 
 add_source_line() {
   local needle="$1" line="$2"
@@ -57,6 +58,7 @@ if (( ! NO_SOURCE )); then
   add_source_line 'wtopen.zsh' '[[ -f ~/.zsh/functions/wtopen.zsh ]] && source ~/.zsh/functions/wtopen.zsh'
   add_source_line 'wtls.zsh'   '[[ -f ~/.zsh/functions/wtls.zsh  ]] && source ~/.zsh/functions/wtls.zsh'
   add_source_line 'wt-common.zsh' '[[ -f ~/.zsh/functions/wt-common.zsh ]] && source ~/.zsh/functions/wt-common.zsh'
+  add_source_line 'wt.zsh'   '[[ -f ~/.zsh/functions/wt.zsh  ]] && source ~/.zsh/functions/wt.zsh'
 fi
 
 # Self-test (non-fatal)
