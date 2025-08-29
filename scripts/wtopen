@@ -88,6 +88,12 @@ USAGE
   fi
 
   # -------- parse worktrees (porcelain) into lines: BRANCH\tDIR --------
+  # Silence stray stderr (e.g., from tracing) during list construction unless debugging
+  local __old_stderr=
+  if [[ -z ${WT_DEBUG:-${WTOPEN_DEBUG:-}} ]]; then
+    exec {__old_stderr}>&2
+    exec 2>/dev/null
+  fi
   local wt_lines
   wt_lines="$(
     git worktree list --porcelain \
@@ -117,6 +123,12 @@ USAGE
     local shortbr; shortbr="$(wt_short_ref "$br")"
     selectable+="$shortbr"$'\t'"$dir"$'\t'"$pr"$'\n'
   done
+
+  # Restore stderr before interactive UI
+  if [[ -n ${__old_stderr:-} ]]; then
+    exec 2>&$__old_stderr
+    exec {__old_stderr}>&-
+  fi
 
   if [[ -n ${WT_DEBUG:-${WTOPEN_DEBUG:-}} ]]; then
     echo "DBG selectable count: $(printf "%s" "$selectable" | sed '/^$/d' | wc -l)" >&2
@@ -177,8 +189,8 @@ USAGE
         out="$(printf "%s" "$matches" \
           | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
                 --prompt="🔎  Pick worktree for $requested_branch: " \
-                --with-nth=1 --delimiter='\t' \
-                --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
+                --with-nth=1 --delimiter=$'\t' \
+                --preview 'd=$(printf "%s" {} | cut -f2); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
                 --preview-window=right,60%)"
         [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
         target_branch="${out%%\t*}"; target_dir="${out#*\t}"
@@ -213,8 +225,8 @@ USAGE
       out="$(printf "%s" "$selectable" \
         | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
               --prompt="📂  Open worktree (type to filter): " \
-              --with-nth=1 --delimiter='\t' \
-              --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
+              --with-nth=1 --delimiter=$'\t' \
+              --preview 'd=$(printf "%s" {} | cut -f2); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
               --preview-window=right,60%)"
       [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
       target_branch="${out%%\t*}"; target_dir="${out#*\t}"; target_dir="${target_dir%%\t*}"
