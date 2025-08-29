@@ -235,7 +235,7 @@ USAGE
     ctrl-a)
       # Simple actions menu
       local act outa
-      outa="$(printf "%s\n" "Open" "Show path" "Remove" "Prune stale" "Set upstream (origin)" \
+      outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Remove" "Prune stale" "Set upstream (origin)" \
         | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
       case "$outa" in
         ("Open")
@@ -243,6 +243,15 @@ USAGE
             && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
             || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true;;
         ("Show path") echo "$sel_path";;
+        ("Copy path")
+          if command -v pbcopy >/dev/null 2>&1; then
+            printf "%s" "$sel_path" | pbcopy && echo "📋 Copied: $sel_path"
+          else
+            echo "$sel_path"
+          fi;;
+        ("Open in terminal")
+          local term_app="${WT_TERMINAL_APP:-iTerm}"
+          open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || echo "❌ Could not open terminal";;
         ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
         ("Prune stale") typeset -f wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
         ("Set upstream (origin)")
