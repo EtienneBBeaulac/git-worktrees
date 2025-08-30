@@ -14,7 +14,10 @@ wt() {
   local branch_arg="" FZF_MISSING=
 
   # Simple config for persistence
-  local cfg_dir="$HOME/.config/git-worktrees" cfg_file="$cfg_dir/hub"
+  local cfg_dir
+  cfg_dir="$HOME/.config/git-worktrees"
+  local cfg_file
+  cfg_file="$cfg_dir/hub"
   if [[ -z ${enter_default:-} ]]; then
     if [[ -f "$cfg_file" ]]; then
       enter_default="$(awk -F'=' '/^ENTER_DEFAULT=/{print $2}' "$cfg_file" | tail -n1)"
@@ -118,6 +121,9 @@ USAGE
 
   if [[ -n ${WT_DEBUG:-} ]]; then
     echo "DBG wt selectable count: $(printf "%s" "$selectable" | sed '/^$/d' | wc -l)" >&2
+    echo "DBG selectable START" >&2
+    printf "%s\n" "$selectable" >&2
+    echo "DBG selectable END" >&2
   fi
 
   if [[ -n $FZF_MISSING ]]; then
@@ -125,9 +131,11 @@ USAGE
     printf "%s" "$selectable" | awk -F"\t" '{printf "- %s  \t%s\n", $1, $2}'
     printf "Pick a branch or 'New branch…': "; local sel; read -r sel
     [[ -z $sel ]] && { echo "❌ No selection"; return 1; }
-    if [[ "$sel" == "➕ New branch…"* ]]; then
+    if [[ "$sel" == "➕ New branch"* ]]; then
       typeset -f wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
       return $?
+    elif [[ "$sel" == "🧵 Show detached"* ]]; then
+      wt --detached --start list; return $?
     else
       local path; path="$(printf "%s" "$selectable" | awk -F"\t" -v b="$sel" '$1==b{print $2; exit}')"
       [[ -z $path ]] && { echo "❌ Unknown selection"; return 1; }
@@ -145,18 +153,22 @@ USAGE
   line="$(printf "%s" "$out" | sed -n '2p')"
   [[ -z $line ]] && { echo "❌ No selection"; return 1; }
 
-  local sel_branch sel_path
-  sel_branch="${line%%\t*}"; sel_path="${line#*\t}"; sel_path="${sel_path%%\t*}"
+  local sel_branch sel_path tab
+  tab=$'\t'
+  sel_branch="${line%%${tab}*}"; sel_path="${line#*${tab}}"; sel_path="${sel_path%%${tab}*}"
+  if [[ -n ${WT_DEBUG:-} ]]; then
+    echo "DBG key=[$key] line=[$line] sel_branch=[$sel_branch] sel_path=[$sel_path]" >&2
+  fi
 
   # New branch row
-  if [[ "$sel_branch" == "➕ New branch…" ]]; then
+  if [[ "$sel_branch" == "➕ New branch"* ]]; then
     typeset -f wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
     return $?
   fi
 
   # Show detached toggle row
-  if [[ "$sel_branch" == "🧵 Show detached…" ]]; then
-    include_detached=1; wt --detached "$@"; return $?
+  if [[ "$sel_branch" == "🧵 Show detached"* || "$sel_path" == "(toggle)" ]]; then
+    include_detached=1; wt --detached --start list "$@"; return $?
   fi
 
   # Map keys
@@ -264,9 +276,11 @@ USAGE
       # Toggle Enter default between open and menu, then re-run hub with same view
       if [[ "$enter_default" == "open" ]]; then
         mkdir -p "$cfg_dir" 2>/dev/null || true
+        mkdir -p "$cfg_dir" 2>/dev/null || true
         { printf "%s\n" "ENTER_DEFAULT=menu"; } > "$cfg_file" 2>/dev/null || true
         WTHUB_ENTER_DEFAULT=menu wt ${include_detached:+--detached} --start list
       else
+        mkdir -p "$cfg_dir" 2>/dev/null || true
         mkdir -p "$cfg_dir" 2>/dev/null || true
         { printf "%s\n" "ENTER_DEFAULT=open"; } > "$cfg_file" 2>/dev/null || true
         WTHUB_ENTER_DEFAULT=open wt ${include_detached:+--detached} --start list

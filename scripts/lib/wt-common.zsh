@@ -17,6 +17,50 @@ wt_short_ref() {
   printf "%s" "$sel"
 }
 
+# Parse `git worktree list --porcelain` blocks into tab-separated rows.
+# Usage:
+#   wt_parse_worktrees_porcelain include_detached "${porcelain_text}"
+# Returns lines like:
+#   branch\t/path/to/worktree
+#   (detached)\t/path/to/worktree   # only if include_detached=1
+wt_parse_worktrees_porcelain() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local include_detached="$1"
+  local porcelain_text="${2:-}"
+  local awk_prog='BEGIN{d="";b="";det=0}
+    function flush(){
+      if(d!=""){
+        if(b!="" && det==0){ gsub(/^refs\/heads\//,"",b); print b "\t" d }
+        else if(det==1 && inc_det==1){ print "(detached)\t" d }
+        d=""; b=""; det=0
+      }
+    }
+    /^worktree /{flush(); d=$2; next}
+    /^branch /  {b=$2; next}
+    /^detached/ {det=1; next}
+    /^$/        {flush()}
+    END         {flush()}'
+  if [[ -z "$porcelain_text" ]]; then
+    porcelain_text="$(cat)"
+  fi
+  # shellcheck disable=SC2016
+  awk -v inc_det="${include_detached}" "$awk_prog" <<< "$porcelain_text"
+}
+
+# Split a tab-delimited line into two fields via $reply array
+# Usage: wt_split_tab "A\tB"; echo ${reply[1]} ${reply[2]}
+wt_split_tab() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local line="$1" tab
+  tab=$'\t'
+  local left="${line%%${tab}*}"
+  local right="${line#*${tab}}"
+  right="${right%%${tab}*}"
+  reply=("$left" "$right")
+}
+
 # Open a directory in Android Studio (robust macOS chain)
 wt_open_in_android_studio() {
   emulate -L zsh

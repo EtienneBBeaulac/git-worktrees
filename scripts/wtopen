@@ -128,9 +128,9 @@ USAGE
     local IFS=$'\n'
     for l in ${(f)selectable}; do
       local sbr="${l%%\t*}"
-      local path="${l#*\t}"; path="${path%%\t*}"
+      local wt_path="${l#*\t}"; wt_path="${wt_path%%\t*}"
       if [[ "$sbr" == "$requested_branch" ]]; then
-        matches+="$sbr"$'\t'"$path"$'\n'
+        matches+="$sbr"$'\t'"$wt_path"$'\n'
       fi
     done
   fi
@@ -197,9 +197,9 @@ USAGE
       local l
       local IFS=$'\n'
       for l in ${(f)selectable}; do
-        local sbr="${l%%\t*}"; local path="${l#*\t}"; path="${path%%\t*}"
+        local sbr="${l%%\t*}"; local wt_path="${l#*\t}"; wt_path="${wt_path%%\t*}"
         if [[ "$sbr" == "$requested_branch" ]]; then
-          target_branch="$sbr"; target_dir="$path"; found=1; break
+          target_branch="$sbr"; target_dir="$wt_path"; found=1; break
         fi
       done
       (( found )) || { echo "❌ Branch '$requested_branch' not in any worktree"; return 1; }

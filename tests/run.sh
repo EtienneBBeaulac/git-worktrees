@@ -12,6 +12,10 @@ run zsh -n "$ROOT_DIR/scripts/wtrm"
 run zsh -n "$ROOT_DIR/scripts/wtopen"
 run zsh -n "$ROOT_DIR/scripts/wtls"
 
+# 1b) Unit tests for helpers
+run zsh "$ROOT_DIR/tests/unit/common_short_ref.zsh"
+run zsh "$ROOT_DIR/tests/unit/common_parse_porcelain.zsh"
+
 # 2) Install script dry run and self-test
 REPO_RAW="file://$ROOT_DIR" DRY_RUN=1 QUIET=1 NO_SOURCE=1 bash "$ROOT_DIR/install.sh"
 
@@ -31,3 +35,12 @@ for f in wt.zsh wtnew.zsh wtrm.zsh wtopen.zsh wtls.zsh wt-common.zsh; do
 done
 
 echo "All tests passed."
+echo
+echo "Running focused behavior tests…"
+zsh "$ROOT_DIR/tests/test_wt_show_detached.zsh"
+zsh "$ROOT_DIR/tests/test_wt_fastpath_open.zsh"
+zsh "$ROOT_DIR/tests/test_wt_ctrl_e_persist.zsh"
+zsh "$ROOT_DIR/tests/test_wtnew_create.zsh"
+zsh "$ROOT_DIR/tests/test_wtopen_basic.zsh"
+zsh "$ROOT_DIR/tests/test_wtrm_safe_and_force.zsh"
+zsh "$ROOT_DIR/tests/test_wtls_status.zsh"
