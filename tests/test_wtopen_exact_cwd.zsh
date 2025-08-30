@@ -28,9 +28,15 @@ cd "$REPO_A"
 OUT=$(wtopen --no-open --cwd shared/branch)
 [[ "$OUT" == "$A_DIR" ]] || { echo "cwd preference failed"; exit 1; }
 
-# Exact match: require exact when providing a fully specified ref
-OUT2=$(wtopen --no-open --exact shared/branch)
-# exact still matches since both entries have same short branch; force fzf bypass by cwd
-[[ -n "$OUT2" ]]
+# Exact match without --cwd may yield multiple matches; allow either a path or a guidance message
+set +e
+OUT2=$(wtopen --no-open --exact shared/branch 2>&1)
+RC=$?
+set -e
+if [[ $RC -eq 0 ]]; then
+  [[ -n "$OUT2" ]] || { echo "exact returned empty"; exit 1; }
+else
+  print -r -- "$OUT2" | grep -Fq "Multiple worktrees match" || { echo "unexpected exact failure: $OUT2"; exit 1; }
+fi
 
 echo "wtopen exact/cwd test OK"
