@@ -1,3 +1,4 @@
+#!/usr/bin/env zsh
 # wt-common: shared helpers for git-worktrees tools (zsh)
 
 typeset -g __WT_COMMON_SOURCED=1
@@ -28,19 +29,7 @@ wt_parse_worktrees_porcelain() {
   setopt local_options pipefail
   local include_detached="$1"
   local porcelain_text="${2:-}"
-  local awk_prog='BEGIN{d="";b="";det=0}
-    function flush(){
-      if(d!=""){
-        if(b!="" && det==0){ gsub(/^refs\/heads\//,"",b); print b "\t" d }
-        else if(det==1 && inc_det==1){ print "(detached)\t" d }
-        d=""; b=""; det=0
-      }
-    }
-    /^worktree /{flush(); d=$2; next}
-    /^branch /  {b=$2; next}
-    /^detached/ {det=1; next}
-    /^$/        {flush()}
-    END         {flush()}'
+  local awk_prog="BEGIN{d=\"\";b=\"\";det=0}\n    function flush(){\n      if(d!=\"\"){\n        if(b!=\"\" && det==0){ gsub(/^refs\\/heads\\//,\"\",b); print b \"\\t\" d }\n        else if(det==1 && inc_det==1){ print \"(detached)\\t\" d }\n        d=\"\"; b=\"\"; det=0\n      }\n    }\n    /^worktree /{flush(); d=$2; next}\n    /^branch /  {b=$2; next}\n    /^detached/ {det=1; next}\n    /^$/        {flush()}\n    END         {flush()}"
   if [[ -z "$porcelain_text" ]]; then
     porcelain_text="$(cat)"
   fi
