@@ -5,8 +5,32 @@ on:
   pull_request:
 
 jobs:
-  build:
-    name: CI matrix
+  fast:
+    name: Fast checks
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        fzf: [false]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup packages (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh git $([ "${{ matrix.fzf }}" = "true" ] && echo fzf || true)
+
+      - name: Run fast tests
+        shell: bash
+        run: |
+          FAST_ONLY=1 bash tests/run.sh
+
+  full:
+    name: Full matrix
+    needs: fast
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -29,10 +53,8 @@ jobs:
           brew update
           brew install zsh git $([ "${{ matrix.fzf }}" = "true" ] && echo fzf || true)
 
-      - name: Run tests
+      - name: Run full tests
         shell: bash
-        env:
-          PATH: ${{ env.PATH }}
         run: |
           bash tests/run.sh
 

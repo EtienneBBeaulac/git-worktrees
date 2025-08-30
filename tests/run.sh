@@ -16,6 +16,15 @@ run zsh -n "$ROOT_DIR/scripts/wtls"
 run zsh "$ROOT_DIR/tests/unit/common_short_ref.zsh"
 run zsh "$ROOT_DIR/tests/unit/common_parse_porcelain.zsh"
 
+if [[ -n "${FAST_ONLY:-}" ]]; then
+  echo
+  echo "Running fast subset…"
+  zsh "$ROOT_DIR/tests/test_wt_fastpath_open.zsh"
+  zsh "$ROOT_DIR/tests/test_wtnew_create.zsh"
+  echo "Fast subset completed."
+  exit 0
+fi
+
 # 2) Install script dry run and self-test
 REPO_RAW="file://$ROOT_DIR" DRY_RUN=1 QUIET=1 NO_SOURCE=1 bash "$ROOT_DIR/install.sh"
 
@@ -41,6 +50,7 @@ zsh "$ROOT_DIR/tests/test_wt_show_detached.zsh"
 zsh "$ROOT_DIR/tests/test_wt_fastpath_open.zsh"
 zsh "$ROOT_DIR/tests/test_wt_ctrl_e_persist.zsh"
 zsh "$ROOT_DIR/tests/test_wt_hub_actions_show_path.zsh"
+zsh "$ROOT_DIR/tests/test_wt_hub_keys_prune_help.zsh"
 zsh "$ROOT_DIR/tests/test_wtnew_create.zsh"
 zsh "$ROOT_DIR/tests/test_wtnew_prefer_reuse.zsh"
 zsh "$ROOT_DIR/tests/test_wtopen_basic.zsh"
@@ -54,3 +64,5 @@ zsh "$ROOT_DIR/tests/test_wtrm_delete_branch_and_rm_detached.zsh"
 zsh "$ROOT_DIR/tests/test_wtls_ahead_behind.zsh"
 zsh "$ROOT_DIR/tests/test_wtls_fzf_open.zsh"
 bash "$ROOT_DIR/tests/test_help_snapshots.sh"
+zsh "$ROOT_DIR/tests/test_error_non_git_dir.zsh"
+zsh "$ROOT_DIR/tests/test_error_invalid_branch.zsh"
