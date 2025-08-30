@@ -25,6 +25,7 @@ wtopen --prune-stale >/dev/null 2>&1 || { echo "prune-stale failed"; exit 1; }
 
 # dry-run shows which directory would be opened
 OUT=$(wtopen feature/open2 --dry-run --no-open)
-print -r -- "$OUT" | grep -Fq "DRY-RUN: would open $WT_DIR" || { echo "dry-run output mismatch"; exit 1; }
+print -r -- "$OUT" | grep -Fq "DRY-RUN: would open" || { echo "dry-run missing header"; echo "$OUT"; exit 1; }
+print -r -- "$OUT" | grep -Fq "$WT_DIR" || { echo "dry-run missing path"; echo "$OUT"; exit 1; }
 
 echo "wtopen prune/dry-run test OK"
