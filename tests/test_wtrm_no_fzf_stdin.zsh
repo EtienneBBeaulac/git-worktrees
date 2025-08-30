@@ -13,7 +13,7 @@ export TEST_TMP
 REPO_DIR="$TEST_TMP/repo"
 create_repo "$REPO_DIR"
 WT_DIR="$TEST_TMP/repo-to-remove"
-add_worktree_branch "$REPO_DIR" "$WT_DIR" feature/rm stdin
+add_worktree_branch "$REPO_DIR" "$WT_DIR" feature/rm HEAD
 
 export HOME="$TEST_TMP/home"
 mkdir -p "$HOME"
