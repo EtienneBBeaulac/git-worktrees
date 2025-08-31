@@ -319,3 +319,51 @@ wt_xargs_supports_parallel() {
   return 0
 }
 
+# ----------------------
+# Unified logging helpers
+# ----------------------
+typeset -g WT_DEBUG_LEVEL_CACHE
+
+wt_get_debug_level() {
+  emulate -L zsh
+  setopt local_options pipefail
+  if [[ -n ${WT_DEBUG_LEVEL_CACHE:-} ]]; then
+    printf "%s" "$WT_DEBUG_LEVEL_CACHE"; return 0
+  fi
+  local lvl="0"
+  local raw="${WT_DEBUG:-}"
+  if [[ -z "$raw" && -n ${WT_CONFIG[WT_DEBUG_DEFAULT]:-} ]]; then
+    raw="${WT_CONFIG[WT_DEBUG_DEFAULT]}"
+  fi
+  if [[ -n "$raw" ]]; then
+    case "${raw:l}" in
+      ("1"|"true"|"on"|"yes") lvl="1";;
+      ("2"|"verbose") lvl="2";;
+      (*) if [[ "$raw" == <-> ]]; then lvl="$raw"; else lvl="1"; fi;;
+    esac
+  fi
+  WT_DEBUG_LEVEL_CACHE="$lvl"
+  printf "%s" "$lvl"
+}
+
+wt__script_name() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local n
+  n="${0##*/}"
+  printf "%s" "$n"
+}
+
+wt_debug() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local lvl; lvl="$(wt_get_debug_level)"
+  (( lvl > 0 )) || return 0
+  local script; script="$(wt__script_name)"
+  printf "%s\n" "DBG [$script] $*" >&2
+}
+
+wt_info()  { emulate -L zsh; setopt local_options pipefail; printf "%s\n" "INF [$0:t] $*" >&2; }
+wt_warn()  { emulate -L zsh; setopt local_options pipefail; printf "%s\n" "WRN [$0:t] $*" >&2; }
+wt_error() { emulate -L zsh; setopt local_options pipefail; printf "%s\n" "ERR [$0:t] $*" >&2; }
+

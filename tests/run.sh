@@ -49,7 +49,7 @@ PREFIX="$HOME_TMP/.zsh/functions" QUIET=1 REPO_RAW="file://$ROOT_DIR" HOME="$HOM
 # Check presence of lines
 for f in wt.zsh wtnew.zsh wtrm.zsh wtopen.zsh wtls.zsh wt-common.zsh; do
   grep -Fq "$f" "$HOME_TMP/.zshrc" || { echo "Missing source for $f"; exit 1; }
-fi
+done
 
 echo "All tests passed."
 echo

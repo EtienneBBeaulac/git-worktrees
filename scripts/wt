@@ -120,12 +120,10 @@ USAGE
     selectable="🧵 Show detached…"$'\t'$'(toggle)'$'\n'"$selectable"
   fi
 
-  if [[ -n ${WT_DEBUG:-} ]]; then
-    echo "DBG wt selectable count: $(printf "%s" "$selectable" | sed '/^$/d' | wc -l)" >&2
-    echo "DBG selectable START" >&2
-    printf "%s\n" "$selectable" >&2
-    echo "DBG selectable END" >&2
-  fi
+  wt_debug "wt selectable count: $(printf "%s" "$selectable" | sed '/^$/d' | wc -l)"
+  wt_debug "selectable START"
+  if [[ -n ${WT_DEBUG:-} ]]; then printf "%s\n" "$selectable" >&2; fi
+  wt_debug "selectable END"
 
   if [[ -n $FZF_MISSING ]]; then
     echo "📝  Worktrees (branch -> dir):"
@@ -157,9 +155,7 @@ USAGE
   local sel_branch sel_path tab
   tab=$'\t'
   sel_branch="${line%%${tab}*}"; sel_path="${line#*${tab}}"; sel_path="${sel_path%%${tab}*}"
-  if [[ -n ${WT_DEBUG:-} ]]; then
-    echo "DBG key=[$key] line=[$line] sel_branch=[$sel_branch] sel_path=[$sel_path]" >&2
-  fi
+  wt_debug "key=[$key] line=[$line] sel_branch=[$sel_branch] sel_path=[$sel_path]"
 
   # New branch row
   if [[ "$sel_branch" == "➕ New branch"* ]]; then
