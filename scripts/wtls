@@ -22,6 +22,11 @@ wtls() {
   [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
 
   local use_fzf=0 do_open=0 open_app="${WT_APP:-Android Studio}" prune_stale=0
+  local fast_mode=0
+  # Env toggle for fast mode
+  if [[ -n ${WT_FAST:-} && ${WT_FAST} != 0 && ${WT_FAST:l} != "false" ]]; then
+    fast_mode=1
+  fi
   local FZF_MISSING=
 
   while [[ $# -gt 0 ]]; do
@@ -31,14 +36,16 @@ wtls() {
       --no-open)     do_open=0; shift;;
       --app)         open_app="$2"; shift 2;;
       --prune-stale) prune_stale=1; shift;;
+      --fast)        fast_mode=1; shift;;
       -h|--help)
         cat <<'USAGE'
-Usage: wtls [--fzf] [--open] [--app NAME] [--prune-stale]
+Usage: wtls [--fzf] [--open] [--app NAME] [--prune-stale] [--fast]
   --fzf          Interactive picker with preview
   --open         When picking with --fzf, open the selected worktree in Android Studio
   --no-open      Do not open, even if --open is set (print path)
   --app NAME     App to open (default: "Android Studio")
   --prune-stale  Prune stale/prunable worktrees and exit
+  --fast         Skip ahead/behind computation for speed
 USAGE
         return 0;;
       *) echo "Unknown option: $1"; return 2;;
@@ -79,7 +86,7 @@ USAGE
     fi
     [[ -z "$shortbr" ]] && shortbr="(detached)@${head:0:7}"
 
-    # Determine status (clean/dirty) and ahead/behind
+    # Determine status (clean/dirty) and optionally ahead/behind
     local status_text="" dirty ahead behind upstream
     dirty="$(git -C "$dir" status --porcelain --untracked-files=all 2>/dev/null)"
     if [[ -n "$dirty" ]]; then
@@ -87,25 +94,27 @@ USAGE
     else
       status_text+="clean"
     fi
-    upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)"
-    local compare_ref=""
-    if [[ -n "$upstream" ]]; then
-      compare_ref="$upstream"
-    else
-      # Fallbacks when no upstream: origin/main → origin/master → main → master
-      local ref
-      for ref in origin/main origin/master main master; do
-        if git -C "$dir" rev-parse --verify -q "$ref" >/dev/null; then
-          compare_ref="$ref"; break
-        fi
-      done
-    fi
-    if [[ -n "$compare_ref" ]]; then
-      local lr; lr="$(git -C "$dir" rev-list --left-right --count "${compare_ref}...HEAD" 2>/dev/null || echo "0 0")"
-      behind="$(echo "$lr" | awk '{print $1}')"
-      ahead="$(echo "$lr" | awk '{print $2}')"
-      if (( ahead > 0 )); then status_text+=" ↑${ahead}"; fi
-      if (( behind > 0 )); then status_text+=" ↓${behind}"; fi
+    if (( ! fast_mode )); then
+      upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)"
+      local compare_ref=""
+      if [[ -n "$upstream" ]]; then
+        compare_ref="$upstream"
+      else
+        # Fallbacks when no upstream: origin/main → origin/master → main → master
+        local ref
+        for ref in origin/main origin/master main master; do
+          if git -C "$dir" rev-parse --verify -q "$ref" >/dev/null; then
+            compare_ref="$ref"; break
+          fi
+        done
+      fi
+      if [[ -n "$compare_ref" ]]; then
+        local lr; lr="$(git -C "$dir" rev-list --left-right --count "${compare_ref}...HEAD" 2>/dev/null || echo "0 0")"
+        behind="$(echo "$lr" | awk '{print $1}')"
+        ahead="$(echo "$lr" | awk '{print $2}')"
+        if (( ahead > 0 )); then status_text+=" ↑${ahead}"; fi
+        if (( behind > 0 )); then status_text+=" ↓${behind}"; fi
+      fi
     fi
 
     lines+="$shortbr\t$dir\t$status_text\n"
