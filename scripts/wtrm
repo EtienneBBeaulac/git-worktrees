@@ -120,9 +120,7 @@ USAGE
     local ok=0 skipped=0 err=0
     local targets; targets="$(printf "%s\n" "$det_list" | sed '/^\s*$/d')"
     local total; total="$(printf "%s\n" "$targets" | wc -l | tr -d ' ')"
-    local jobs=${jobs_opt:-${WTRM_JOBS:-4}}
-    (( total <= 3 )) && jobs=1
-    (( jobs > total )) && jobs=$total
+    local jobs; jobs="$(wt_detect_jobs_cap "${jobs_opt:-${WTRM_JOBS:-}}" "$total")"
 
     if (( jobs <= 1 )); then
       local wt_path sha dirty
@@ -140,40 +138,109 @@ USAGE
         fi
       done <<<"$targets"
     else
-      # parallel
-      local fifo; fifo=$(mktemp -u)
-      mkfifo "$fifo" || { echo "❌ mkfifo failed"; return 1; }
-      exec 9<>"$fifo"; rm -f "$fifo"
-      local results; results="$(mktemp)"
-      local i; for i in $(seq 1 $jobs); do echo >&9; done
-      while read -r wt_path sha; do
-        read -u 9
-        {
-          if [[ -z "$wt_path" ]]; then echo >&9; exit 0; fi
-          local m_dirty; m_dirty="$(git -C "$wt_path" status --porcelain --untracked-files=all 2>/dev/null)"
-          if [[ -n "$m_dirty" && $force -eq 0 ]]; then
-            printf "%s\n" "SKIP $wt_path" >> "$results"
-          else
-            if git worktree remove ${force:+--force} "$wt_path"; then
-              printf "%s\n" "OK $wt_path" >> "$results"
-            else
-              printf "%s\n" "ERR $wt_path" >> "$results"
-            fi
+      # Prefer xargs parallelism with deterministic order
+      if wt_xargs_supports_parallel; then
+        # Prepare a NUL-delimited input with index|path|sha
+        local input_file; input_file="$(mktemp)"
+        local idx=0
+        while read -r wt_path sha; do
+          idx=$((idx+1))
+          printf "%s\0%s\0%s\0" "$idx" "$wt_path" "$sha" >> "$input_file"
+        done <<<"$targets"
+        # Use sh -c worker that consumes 3 args and respects F_FORCE env; emit tab-delimited IDX,TYPE,PATH
+        local results_file; results_file="$(mktemp)"
+        F_FORCE=$force xargs -0 -n 3 -P "$jobs" sh -c '
+          idx="$1"; p="$2"; s="$3";
+          if [ -z "$p" ]; then printf "%s\tERR\tempty\n" "$idx"; exit 0; fi
+          m_dirty=$(git -C "$p" status --porcelain --untracked-files=all 2>/dev/null || true)
+          if [ -n "$m_dirty" ] && [ "${F_FORCE:-0}" -eq 0 ]; then
+            printf "%s\tSKIP\t%s\n" "$idx" "$p"; exit 0
           fi
-          echo >&9
-        } &
-      done <<<"$targets"
-      wait
-      exec 9>&- 9<&-
-      # Print results and summarize
-      while IFS= read -r line; do
-        case "$line" in
-          ("OK "*)    echo "🗑  Removed: ${line#OK }"; ((ok++));;
-          ("SKIP "*)  echo "⏭️  Skipping dirty detached worktree: ${line#SKIP } (use --force to remove)"; ((skipped++));;
-          ("ERR "*)   echo "❌ Failed to remove: ${line#ERR }"; ((err++));;
-        esac
-      done < "$results"
-      rm -f "$results"
+          if git worktree remove $( [ "${F_FORCE:-0}" -ne 0 ] && printf %s -- --force ) "$p" >/dev/null 2>&1; then
+            printf "%s\tOK\t%s\n" "$idx" "$p"
+          else
+            printf "%s\tERR\t%s\n" "$idx" "$p"
+          fi
+        ' _ < "$input_file" | sort -n -k1,1 > "$results_file"
+        while IFS=$'\t' read -r i kind path_rest; do
+          case "$kind" in
+            (OK)   echo "🗑  Removed: ${path_rest}"; ((ok++));;
+            (SKIP) echo "⏭️  Skipping dirty detached worktree: ${path_rest} (use --force to remove)"; ((skipped++));;
+            (ERR)  echo "❌ Failed to remove: ${path_rest}"; ((err++));;
+          esac
+        done < "$results_file"
+        rm -f "$results_file" "$input_file"
+      else
+        # Fallback: mkfifo/semaphore if available; else serial
+        if command -v mkfifo >/dev/null 2>&1 && command -v seq >/dev/null 2>&1; then
+          local fifo; fifo=$(mktemp -u)
+          mkfifo "$fifo" || { echo "❌ mkfifo failed"; jobs=1; }
+          if (( jobs > 1 )); then
+            exec 9<>"$fifo"; rm -f "$fifo"
+            local i; for i in $(seq 1 $jobs); do echo >&9; done
+            local results; results="$(mktemp)"
+            while read -r wt_path sha; do
+              read -u 9
+              {
+                if [[ -z "$wt_path" ]]; then echo >&9; exit 0; fi
+                local m_dirty; m_dirty="$(git -C "$wt_path" status --porcelain --untracked-files=all 2>/dev/null)"
+                if [[ -n "$m_dirty" && $force -eq 0 ]]; then
+                  printf "%s\n" "SKIP $wt_path" >> "$results"
+                else
+                  if git worktree remove ${force:+--force} "$wt_path"; then
+                    printf "%s\n" "OK $wt_path" >> "$results"
+                  else
+                    printf "%s\n" "ERR $wt_path" >> "$results"
+                  fi
+                fi
+                echo >&9
+              } &
+            done <<<"$targets"
+            wait
+            exec 9>&- 9<&-
+            while IFS= read -r line; do
+              case "$line" in
+                ("OK "*)    echo "🗑  Removed: ${line#OK }"; ((ok++));;
+                ("SKIP "*)  echo "⏭️  Skipping dirty detached worktree: ${line#SKIP } (use --force to remove)"; ((skipped++));;
+                ("ERR "*)   echo "❌ Failed to remove: ${line#ERR }"; ((err++));;
+              esac
+            done < "$results"
+            rm -f "$results"
+          else
+            # fallback to serial
+            local wt_path sha dirty
+            while read -r wt_path sha; do
+              [[ -z "$wt_path" ]] && continue
+              dirty="$(git -C "$wt_path" status --porcelain --untracked-files=all 2>/dev/null)"
+              if [[ -n "$dirty" && $force -eq 0 ]]; then
+                echo "⏭️  Skipping dirty detached worktree: $wt_path (use --force to remove)"
+                ((skipped++)); continue
+              fi
+              if git worktree remove ${force:+--force} "$wt_path"; then
+                echo "🗑  Removed: $wt_path"; ((ok++))
+              else
+                echo "❌ Failed to remove: $wt_path"; ((err++))
+              fi
+            done <<<"$targets"
+          fi
+        else
+          # No mkfifo/seq; serial
+          local wt_path sha dirty
+          while read -r wt_path sha; do
+            [[ -z "$wt_path" ]] && continue
+            dirty="$(git -C "$wt_path" status --porcelain --untracked-files=all 2>/dev/null)"
+            if [[ -n "$dirty" && $force -eq 0 ]]; then
+              echo "⏭️  Skipping dirty detached worktree: $wt_path (use --force to remove)"
+              ((skipped++)); continue
+            fi
+            if git worktree remove ${force:+--force} "$wt_path"; then
+              echo "🗑  Removed: $wt_path"; ((ok++))
+            else
+              echo "❌ Failed to remove: $wt_path"; ((err++))
+            fi
+          done <<<"$targets"
+        fi
+      fi
     fi
 
     echo "🧹 Pruning stale entries…"

@@ -268,3 +268,54 @@ wt_get_config() {
   fi
 }
 
+# ----------------------
+# System utilities
+# ----------------------
+
+# Return number of CPUs available
+wt_num_cpus() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local n=""
+  if command -v getconf >/dev/null 2>&1; then
+    n="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  fi
+  if [[ -z "$n" ]] && command -v sysctl >/dev/null 2>&1; then
+    n="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+  fi
+  if [[ -z "$n" ]] && command -v nproc >/dev/null 2>&1; then
+    n="$(nproc 2>/dev/null || true)"
+  fi
+  [[ -z "$n" ]] && n=2
+  printf "%s" "$n"
+}
+
+# Decide parallel jobs based on requested value and total tasks
+wt_detect_jobs_cap() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local requested="$1" total="$2"
+  local cpus; cpus="$(wt_num_cpus)"
+  local def_jobs=4
+  if [[ "$cpus" -lt "$def_jobs" ]]; then def_jobs="$cpus"; fi
+  local jobs
+  if [[ -n "$requested" ]]; then
+    jobs="$requested"
+  else
+    jobs="$def_jobs"
+  fi
+  if [[ -z "$total" || "$total" -lt 1 ]]; then total=1; fi
+  if [[ "$jobs" -gt "$total" ]]; then jobs="$total"; fi
+  if [[ "$jobs" -lt 1 ]]; then jobs=1; fi
+  printf "%s" "$jobs"
+}
+
+# Check if xargs supports -P (parallel) and -0
+wt_xargs_supports_parallel() {
+  emulate -L zsh
+  setopt local_options pipefail
+  command -v xargs >/dev/null 2>&1 || return 1
+  printf "%s\0" x | xargs -0 -P 2 -n 1 echo >/dev/null 2>&1 || return 1
+  return 0
+}
+
