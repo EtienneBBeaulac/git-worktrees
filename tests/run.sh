@@ -2,19 +2,21 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-# Normalize environment for deterministic behavior across OS/CI
+# Normalize environment for deterministic behavior
 export LC_ALL=C LANG=C TZ=UTC
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TEMPLATE_DIR=/dev/null
-export PATH="$ROOT_DIR/tests/bin:$PATH"
+# Ensure HOME exists during tests
+export HOME=${HOME:-"$ROOT_DIR/.tmp_home"}
+mkdir -p "$HOME" >/dev/null 2>&1 || true
 
 run() { echo "[TEST] $*"; "$@"; }
 
 # 1) Syntax checks
-run zsh -n "$ROOT_DIR/scripts/wt"
-run zsh -n "$ROOT_DIR/scripts/wtnew"
-run zsh -n "$ROOT_DIR/scripts/wtrm"
-run zsh -n "$ROOT_DIR/scripts/wtopen"
-run zsh -n "$ROOT_DIR/scripts/wtls"
+run zsh -fn "$ROOT_DIR/scripts/wt"
+run zsh -fn "$ROOT_DIR/scripts/wtnew"
+run zsh -fn "$ROOT_DIR/scripts/wtrm"
+run zsh -fn "$ROOT_DIR/scripts/wtopen"
+run zsh -fn "$ROOT_DIR/scripts/wtls"
 
 # 1b) Unit tests for helpers
 run zsh "$ROOT_DIR/tests/unit/common_short_ref.zsh"
