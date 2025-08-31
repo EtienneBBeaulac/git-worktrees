@@ -26,7 +26,9 @@ mkdir -p "$HOME"
 # Exact match should resolve without fzf to the single match if cwd is in A
 cd "$REPO_A"
 OUT=$(wtopen --no-open --cwd shared/branch)
-[[ "$OUT" == "$A_DIR" ]] || { echo "cwd preference failed"; exit 1; }
+PHYS_OUT=$(cd "$OUT" && pwd -P)
+PHYS_A=$(cd "$A_DIR" && pwd -P)
+[[ "$PHYS_OUT" == "$PHYS_A" ]] || { echo "cwd preference failed"; exit 1; }
 
 # Exact match without --cwd may yield multiple matches; allow either a path or a guidance message
 set +e

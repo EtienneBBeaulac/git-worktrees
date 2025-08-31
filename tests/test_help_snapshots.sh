@@ -15,11 +15,11 @@ check_help() {
   printf "%s\n" "$out" | redact >/dev/null
 }
 
-check_help "$ROOT_DIR/scripts/wt"
-check_help "$ROOT_DIR/scripts/wtnew"
-check_help "$ROOT_DIR/scripts/wtopen"
-check_help "$ROOT_DIR/scripts/wtrm"
-check_help "$ROOT_DIR/scripts/wtls"
+check_help ". $ROOT_DIR/scripts/wt; wt"
+check_help ". $ROOT_DIR/scripts/wtnew; wtnew"
+check_help ". $ROOT_DIR/scripts/wtopen; wtopen"
+check_help ". $ROOT_DIR/scripts/wtrm; wtrm"
+check_help ". $ROOT_DIR/scripts/wtls; wtls"
 
 echo "help snapshots OK"
 

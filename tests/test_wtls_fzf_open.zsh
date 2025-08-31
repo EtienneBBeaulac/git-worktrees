@@ -35,9 +35,11 @@ EOF
 chmod +x "$STUB_BIN/fzf"
 
 wtls --fzf --open >/dev/null 2>&1 || true
-
-# Ensure our stub 'open' saw the dir
-grep -Fq "$WT_DIR" "$TEST_TMP/open_calls.txt" || { echo "wtls fzf open did not call open"; exit 1; }
+# Normalize both expected and actual to physical paths
+PHYS_WT=$(cd "$WT_DIR" && pwd -P)
+ACTUAL_PATH=$(awk '{print $NF}' "$TEST_TMP/open_calls.txt" | tail -n 1)
+PHYS_ACTUAL=$(cd "$ACTUAL_PATH" && pwd -P)
+[[ "$PHYS_ACTUAL" == "$PHYS_WT" ]] || { echo "wtls fzf open did not call open"; exit 1; }
 
 echo "wtls fzf open test OK"
 

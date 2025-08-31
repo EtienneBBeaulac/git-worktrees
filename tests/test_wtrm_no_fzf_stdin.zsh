@@ -25,7 +25,7 @@ cd "$REPO_DIR"
 wtrm --prune-only >/dev/null 2>&1 || { echo "prune-only failed"; exit 1; }
 
 # --no-fzf path prompt: feed path via stdin
-run_with_input "$WT_DIR\n" zsh -fc "wtrm --no-fzf" || true
+run_with_input "$WT_DIR\n" zsh -fc ". $ROOT_DIR/scripts/wtrm; wtrm --no-fzf" || true
 [[ ! -d "$WT_DIR" ]] || { echo "no-fzf stdin removal failed"; exit 1; }
 
 echo "wtrm no-fzf stdin test OK"

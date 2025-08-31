@@ -20,13 +20,16 @@ mkdir -p "$HOME"
 
 cd "$REPO_DIR"
 
-# --list prints rows
+# --list prints rows (normalize path differences like /var vs /private/var)
 OUT=$(wtopen --list)
 print -r -- "$OUT" | grep -Fq "feature/open"
-print -r -- "$OUT" | grep -Fq "$BR_DIR"
+PHYS_DIR=$(cd "$BR_DIR" && pwd -P)
+print -r -- "$OUT" | grep -Fq "$PHYS_DIR"
 
-# --no-open prints path
+# --no-open prints path (normalize)
 PATH_OUT=$(wtopen feature/open --no-open)
-assert_eq "$PATH_OUT" "$BR_DIR"
+PHYS_OUT=$(cd "$PATH_OUT" && pwd -P)
+PHYS_BR=$(cd "$BR_DIR" && pwd -P)
+assert_eq "$PHYS_OUT" "$PHYS_BR"
 
 echo "wtopen basic test OK"

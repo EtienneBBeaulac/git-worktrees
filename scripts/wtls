@@ -1,5 +1,18 @@
 # wtls: list Git worktrees with status, optional fzf picker
 # macOS + zsh/bash friendly. Requires: git, (optional) fzf
+
+# Resolve script directory and source common helpers at load time (no subshell)
+emulate -L zsh
+setopt pipefail
+typeset -g WTLS__SCRIPT_FILE WTLS__SCRIPT_DIR WTLS__COMMON_LIB
+WTLS__SCRIPT_FILE=${(%):-%N}
+if [[ -n $WTLS__SCRIPT_FILE && -f $WTLS__SCRIPT_FILE ]]; then
+  WTLS__SCRIPT_DIR="${WTLS__SCRIPT_FILE:A:h}"
+else
+  WTLS__SCRIPT_DIR="${0:A:h}"
+fi
+WTLS__COMMON_LIB="${WTLS__SCRIPT_DIR}/lib/wt-common.zsh"
+[[ -f "$WTLS__COMMON_LIB" ]] && source "$WTLS__COMMON_LIB" || true
 wtls() {
   emulate -L zsh
   setopt local_options pipefail no_xtrace
@@ -42,28 +55,10 @@ USAGE
 
   command -v fzf >/dev/null || FZF_MISSING=1
 
-  # Parse worktrees: dir|branch|head
-  local wt_table
-  wt_table="$(
-    git worktree list --porcelain |
-    awk '
-      BEGIN { path=""; head=""; br="" }
-      function flush() {
-        if (path != "") {
-          if (br == "") br="(detached)";
-          printf "%s|%s|%s\n", path, br, head
-        }
-      }
-      /^worktree / { flush(); path=$2; head=""; br=""; next }
-      /^HEAD /     { head=$2; next }
-      /^branch /   {
-        br=$0
-        sub(/^branch /,"",br)
-        next
-      }
-      END { flush() }
-    '
-  )"
+  # Parse worktrees via shared helper: path|branch|head
+  local porcelain wt_table
+  porcelain="$(git worktree list --porcelain 2>/dev/null)"
+  wt_table="$(wt_parse_worktrees_table "$porcelain")"
 
   [[ -z "$wt_table" ]] && { echo "ℹ️  No worktrees found."; return 0; }
 
@@ -85,23 +80,35 @@ USAGE
     [[ -z "$shortbr" ]] && shortbr="(detached)@${head:0:7}"
 
     # Determine status (clean/dirty) and ahead/behind
-    local status="" dirty ahead behind upstream
+    local status_text="" dirty ahead behind upstream
     dirty="$(git -C "$dir" status --porcelain --untracked-files=all 2>/dev/null)"
     if [[ -n "$dirty" ]]; then
-      status+="dirty"
+      status_text+="dirty"
     else
-      status+="clean"
+      status_text+="clean"
     fi
     upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)"
+    local compare_ref=""
     if [[ -n "$upstream" ]]; then
-      local lr; lr="$(git -C "$dir" rev-list --left-right --count "${upstream}...HEAD" 2>/dev/null || echo "0 0")"
+      compare_ref="$upstream"
+    else
+      # Fallbacks when no upstream: origin/main → origin/master → main → master
+      local ref
+      for ref in origin/main origin/master main master; do
+        if git -C "$dir" rev-parse --verify -q "$ref" >/dev/null; then
+          compare_ref="$ref"; break
+        fi
+      done
+    fi
+    if [[ -n "$compare_ref" ]]; then
+      local lr; lr="$(git -C "$dir" rev-list --left-right --count "${compare_ref}...HEAD" 2>/dev/null || echo "0 0")"
       behind="$(echo "$lr" | awk '{print $1}')"
       ahead="$(echo "$lr" | awk '{print $2}')"
-      if (( ahead > 0 )); then status+=" ↑${ahead}"; fi
-      if (( behind > 0 )); then status+=" ↓${behind}"; fi
+      if (( ahead > 0 )); then status_text+=" ↑${ahead}"; fi
+      if (( behind > 0 )); then status_text+=" ↓${behind}"; fi
     fi
 
-    lines+="$shortbr\t$dir\t$status\n"
+    lines+="$shortbr\t$dir\t$status_text\n"
   done
 
   if (( use_fzf )) && [[ -z $FZF_MISSING ]]; then
@@ -112,19 +119,27 @@ USAGE
             --with-nth=1,2 --delimiter='\t' \
             --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then cd "$d" && git status -sb --untracked-files=all; echo; git log --oneline -n 20 --decorate --graph --color=always; fi' \
             --preview-window=right,60%)" || { echo "❌ No selection"; return 1; }
-    local sel_branch sel_dir
-    sel_branch="${out%%\t*}"
-    sel_dir="${out#*\t}"; sel_dir="${sel_dir%%\t*}"
+    local sel_branch sel_dir line
+    line="$(printf "%s\n" "$out" | tail -n 1)"
+    sel_branch="$(printf "%s\n" "$line" | awk -F"\t" '{print $1}')"
+    sel_dir="$(printf "%s\n" "$line" | awk -F"\t" '{print $2}')"
     if (( do_open )); then
       echo "🚀  Opening Android Studio…"
-      if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
+      [[ -n ${TEST_TMP:-} ]] && {
+        {
+          echo "sel_dir=$sel_dir"; echo "open_app=$open_app";
+          echo "which open: $(command -v open || true)";
+          echo "which xdg-open: $(command -v xdg-open || true)";
+        } >> "${TEST_TMP}/wtls_dbg.txt" 2>/dev/null || true
+      }
+      # Test hook: record selection path for verification
+      [[ -n ${TEST_TMP:-} ]] && { printf "%s\n" "$sel_dir" >> "${TEST_TMP}/open_calls.txt" 2>/dev/null || true; }
+      if command -v open >/dev/null 2>&1; then
+        open -a "$open_app" "$sel_dir" >/dev/null 2>&1 || true
+      elif typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
         wt_open_in_android_studio "$sel_dir" "$open_app"
-      else
-        if command -v studio >/dev/null 2>&1; then
-          studio "$sel_dir" >/dev/null 2>&1 || true
-        else
-          open -a "$open_app" "$sel_dir" >/dev/null 2>&1 || true
-        fi
+      elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$sel_dir" >/dev/null 2>&1 || true
       fi
       echo "📂  If no window appears, open it manually via File → Open… → $sel_dir"
     else

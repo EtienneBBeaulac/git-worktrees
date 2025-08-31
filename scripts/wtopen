@@ -1,14 +1,25 @@
 # wtopen: find and open an existing Git worktree for a given branch
 # macOS + zsh/bash friendly. Requires: git, (optional) fzf
+
+# Resolve script directory and source common helpers at load time (no subshell)
+emulate -L zsh
+setopt pipefail
+typeset -g WTOPEN__SCRIPT_FILE WTOPEN__SCRIPT_DIR WTOPEN__COMMON_LIB
+WTOPEN__SCRIPT_FILE=${(%):-%N}
+if [[ -n $WTOPEN__SCRIPT_FILE && -f $WTOPEN__SCRIPT_FILE ]]; then
+  WTOPEN__SCRIPT_DIR="${WTOPEN__SCRIPT_FILE:A:h}"
+else
+  WTOPEN__SCRIPT_DIR="${0:A:h}"
+fi
+WTOPEN__COMMON_LIB="${WTOPEN__SCRIPT_DIR}/lib/wt-common.zsh"
+[[ -f "$WTOPEN__COMMON_LIB" ]] && source "$WTOPEN__COMMON_LIB" || true
 wtopen() {
   emulate -L zsh
   setopt local_options pipefail
   unsetopt xtrace verbose
   set +xv 2>/dev/null || true
 
-  # Source common helpers if available
-  local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
-  [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
+  # helpers are sourced at load time
 
 
   local branch_ref="" open_ide=1 open_app="${WT_APP:-Android Studio}"
@@ -88,27 +99,10 @@ USAGE
     requested_branch="$branch_ref"
   fi
 
-  # -------- parse worktrees and emit selectable lines (branch\tpath) in awk --------
-  local selectable
-  selectable="$(
-    git worktree list --porcelain 2>/dev/null | awk '
-      BEGIN{d="";b="";det=0}
-      function flush(){
-        if(d!=""){
-          if(b!="" && det==0){
-            gsub(/^refs\/heads\//,"",b);
-            print b "\t" d;
-          }
-          d=""; b=""; det=0;
-        }
-      }
-      /^worktree /{flush(); d=$2; next}
-      /^branch /  {b=$2; next}
-      /^detached/ {det=1; next}
-      /^$/        {flush();}
-      END         {flush();}
-    '
-  )"
+  # -------- parse worktrees via shared helper (branch\tpath) --------
+  local selectable porcelain
+  porcelain="$(git worktree list --porcelain 2>/dev/null)"
+  selectable="$(wt_parse_worktrees_porcelain 0 "$porcelain")"
 
   if [[ -n ${WT_DEBUG:-${WTOPEN_DEBUG:-}} ]]; then
     echo "DBG selectable count: $(printf "%s" "$selectable" | sed '/^$/d' | wc -l)" >&2
@@ -121,18 +115,10 @@ USAGE
     return 0
   fi
 
-  # Find matches if branch requested
+  # Find matches if branch requested (use awk for robust matching)
   local matches=""
   if [[ -n $requested_branch ]]; then
-    local l
-    local IFS=$'\n'
-    for l in ${(f)selectable}; do
-      local sbr="${l%%\t*}"
-      local wt_path="${l#*\t}"; wt_path="${wt_path%%\t*}"
-      if [[ "$sbr" == "$requested_branch" ]]; then
-        matches+="$sbr"$'\t'"$wt_path"$'\n'
-      fi
-    done
+    matches="$(printf "%s\n" "$selectable" | awk -F"\t" -v b="$requested_branch" '$1==b{print $0}')"
   fi
 
   # If prefer_cwd and multiple matches, prefer those sharing git-common-dir
@@ -161,10 +147,10 @@ USAGE
 
   if [[ -n $requested_branch && -n $matches && $force_fzf -eq 0 ]]; then
     # If single match, pick it; if multiple, fall back to fzf if present
-    local count; count="$(printf "%s" "$matches" | sed '/^$/d' | wc -l | tr -d ' ')"
+    local count; count="$(printf "%s\n" "$matches" | sed '/^$/d' | wc -l | tr -d ' ')"
     if [[ "$count" == "1" ]]; then
-      target_branch="${matches%%\t*}"
-      target_dir="${matches#*\t}"
+      target_branch="$(printf "%s\n" "$matches" | awk -F"\t" 'NR==1{print $1}')"
+      target_dir="$(printf "%s\n" "$matches" | awk -F"\t" 'NR==1{print $2}')"
     else
       if [[ -z $FZF_MISSING ]]; then
         local out

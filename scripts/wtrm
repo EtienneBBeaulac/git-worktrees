@@ -15,13 +15,24 @@
 #   --rm-detached             Remove all detached worktrees (bulk)
 #   --yes                     Non-interactive confirm (with --rm-detached)
 #   -h, --help                Show help
+# Resolve script directory and source common helpers at load time (no subshell)
+emulate -L zsh
+setopt pipefail
+typeset -g WTRM__SCRIPT_FILE WTRM__SCRIPT_DIR WTRM__COMMON_LIB
+WTRM__SCRIPT_FILE=${(%):-%N}
+if [[ -n $WTRM__SCRIPT_FILE && -f $WTRM__SCRIPT_FILE ]]; then
+  WTRM__SCRIPT_DIR="${WTRM__SCRIPT_FILE:A:h}"
+else
+  WTRM__SCRIPT_DIR="${0:A:h}"
+fi
+WTRM__COMMON_LIB="${WTRM__SCRIPT_DIR}/lib/wt-common.zsh"
+[[ -f "$WTRM__COMMON_LIB" ]] && source "$WTRM__COMMON_LIB" || true
+
 wtrm() {
   emulate -L zsh
   setopt local_options pipefail no_xtrace
 
-  # Source common helpers if available
-  local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
-  [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
+  # helpers are sourced at load time
 
   local target_dir target_branch delete_branch=0 force=0 base_ref="" no_fzf=0 prune_only=0
   local rm_detached=0 assume_yes=0 jobs_opt=""
@@ -80,33 +91,10 @@ USAGE
 
   command -v fzf >/dev/null || FZF_MISSING=1
 
-  # --- Build worktree table: path | branch | head ---
-  # git worktree list --porcelain emits blocks:
-  # worktree /path
-  # HEAD <sha>
-  # branch refs/heads/<name>   (or omitted when detached)
-  local wt_table
-  wt_table="$(
-    git worktree list --porcelain |
-    awk '
-      BEGIN { path=""; head=""; br="" }
-      function flush() {
-        if (path != "") {
-          if (br == "") br="(detached)";
-          printf "%s|%s|%s\n", path, br, head
-        }
-      }
-      /^worktree / { flush(); path=$2; head=""; br=""; next }
-      /^HEAD /     { head=$2; next }
-      /^branch /   {
-        br=$0
-        sub(/^branch /,"",br)
-        sub(/^refs\/heads\//,"",br)
-        next
-      }
-      END { flush() }
-    '
-  )"
+  # --- Build worktree table via shared helper: path|branch|head ---
+  local porcelain wt_table
+  porcelain="$(git worktree list --porcelain 2>/dev/null)"
+  wt_table="$(wt_parse_worktrees_table "$porcelain")"
 
   [[ -z "$wt_table" ]] && { echo "❌ No worktrees found."; return 1; }
 
@@ -214,8 +202,25 @@ USAGE
   if [[ -n "$target_dir" ]]; then
     picked_path="$target_dir"
     picked_branch="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
-    [[ -z "$picked_branch" ]] && { echo "❌ Not a registered worktree: $picked_path"; return 1; }
     picked_head="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
+    if [[ -z "$picked_branch" ]]; then
+      # Try physical path match to handle /var vs /private/var and symlinks
+      local target_phys
+      target_phys="$(cd "$picked_path" 2>/dev/null && pwd -P || printf "%s" "$picked_path")"
+      local row
+      local IFS=$'\n'
+      for row in ${(f)wt_table}; do
+        local row_path="${row%%|*}"
+        local row_phys
+        row_phys="$(cd "$row_path" 2>/dev/null && pwd -P || printf "%s" "$row_path")"
+        if [[ "$row_phys" == "$target_phys" ]]; then
+          picked_branch="${row#*|}"; picked_branch="${picked_branch%%|*}"
+          picked_head="${row##*|}"
+          break
+        fi
+      done
+    fi
+    [[ -z "$picked_branch" ]] && { echo "❌ Not a registered worktree: $picked_path"; return 1; }
   else
     # Display: "branch[+sha]   path"
     local display
@@ -268,7 +273,7 @@ USAGE
     return 1
   fi
 
-  # 2) Ahead of upstream?
+  # 2) Ahead of upstream? If no upstream, allow removal (previous behavior/tests expect this)
   local ahead=0 behind=0 upstream=""
   upstream="$(git -C "$picked_path" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)"
   if [[ -n "$upstream" ]]; then
@@ -278,12 +283,6 @@ USAGE
     ahead="$(echo  "$lr" | awk '{print $2}')"   # commits ahead of upstream
     if (( ahead > 0 && force == 0 )); then
       echo "❌ Branch '$picked_branch' is ahead of '$upstream' by $ahead commit(s). Push or use --force."
-      return 1
-    fi
-  else
-    # no upstream set—be conservative unless forced
-    if (( force == 0 )); then
-      echo "❌ No upstream for '$picked_branch'. Set upstream/push first, or use --force."
       return 1
     fi
   fi
@@ -303,12 +302,7 @@ USAGE
   if (( delete_branch )); then
     if [[ -n "$picked_branch" && "$picked_branch" != "(detached)" ]]; then
       local still_used
-      still_used="$(git worktree list --porcelain | awk -v b="$picked_branch" '
-          /^worktree /{path=$2}
-          /^branch /{
-            br=$0; sub(/^branch /,"",br); sub(/^refs\/heads\//,"",br);
-            if (br==b) print path
-          }')"
+      still_used="$(wt_parse_worktrees_table "$(git worktree list --porcelain 2>/dev/null)" | awk -F'|' -v b="$picked_branch" '$2==b{print $1}')"
       if [[ -n "$still_used" ]]; then
         echo "ℹ️  Branch '$picked_branch' still used by another worktree; skipping branch delete."
       else

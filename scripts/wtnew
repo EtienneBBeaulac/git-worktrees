@@ -134,14 +134,12 @@ USAGE
   fi
   new_branch="$short_branch"
 
-  # sanitize & validate local branch name
-  local sane_branch
-  sane_branch=$(printf "%s" "$new_branch" \
-    | tr ' ' '-' \
-    | sed 's#[^A-Za-z0-9/_\-]##g')
-  git check-ref-format --branch "$sane_branch" \
-    || { echo "❌ Invalid branch name: $sane_branch"; return 1; }
-  new_branch="$sane_branch"
+  # Strict validation of local branch name (no mutation/sanitization)
+  if ! [[ "$new_branch" =~ ^[A-Za-z0-9/_\-]+$ ]]; then
+    echo "❌ Invalid branch name: $new_branch"; return 1
+  fi
+  git check-ref-format --branch "$new_branch" \
+    || { echo "❌ Invalid branch name: $new_branch"; return 1; }
 
   # -------- existence checks across local + any remote --------
   local local_exists=0 remote_exists=0 remote_found=""
