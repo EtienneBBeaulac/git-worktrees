@@ -1,14 +1,25 @@
 # wt: hub for listing and acting on Git worktrees
 # macOS + zsh/bash friendly. Requires: git, (optional) fzf
+
+# Resolve script directory and source common helpers at load time (no subshell)
+emulate -L zsh
+setopt pipefail
+typeset -g WT__SCRIPT_FILE WT__SCRIPT_DIR WT__COMMON_LIB
+WT__SCRIPT_FILE=${(%):-%N}
+if [[ -n $WT__SCRIPT_FILE && -f $WT__SCRIPT_FILE ]]; then
+  WT__SCRIPT_DIR="${WT__SCRIPT_FILE:A:h}"
+else
+  WT__SCRIPT_DIR="${0:A:h}"
+fi
+WT__COMMON_LIB="${WT__SCRIPT_DIR}/lib/wt-common.zsh"
+[[ -f "$WT__COMMON_LIB" ]] && source "$WT__COMMON_LIB" || true
 wt() {
   emulate -L zsh
   setopt local_options pipefail
   unsetopt xtrace verbose
   set +xv 2>/dev/null || true
 
-  # Source common helpers if available
-  local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
-  [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
+  # helpers are sourced at load time
 
   local start_mode="list" include_detached=0 enter_default="${WTHUB_ENTER_DEFAULT:-}"
   local branch_arg="" FZF_MISSING=
@@ -60,10 +71,11 @@ USAGE
     if git remote | grep -Fxq "${br_short%%/*}" && [[ "$br_short" == */* ]]; then
       br_short="${br_short#*/}"
     fi
-    existing_dir="$(git worktree list --porcelain | awk -v b="$br_short" '
-      /^worktree /{d=$2}
-      /^branch /{br=$0; sub(/^branch /,"",br); sub(/^refs\/heads\//,"",br); if (br==b) print d}
-    ' | head -n1)"
+    # Use common porcelain parser to resolve existing worktree path for branch
+    local porcelain rows
+    porcelain="$(git worktree list --porcelain 2>/dev/null)"
+    rows="$(wt_parse_worktrees_porcelain 0 "$porcelain")"
+    existing_dir="$(printf "%s\n" "$rows" | awk -F"\t" -v b="$br_short" '$1==b{print $2; exit}')"
     if [[ -n $existing_dir && -d $existing_dir ]]; then
       if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
         echo "🚀  Opening Android Studio…"
@@ -94,24 +106,9 @@ USAGE
   fi
 
   # Build list (branch\tpath). Detached hidden by default.
-  local selectable
-  selectable="$(
-    git worktree list --porcelain 2>/dev/null | awk -v show_det=$include_detached '
-      BEGIN{d="";b="";det=0}
-      function flush(){
-        if(d!=""){
-          if(b!="" && det==0){ gsub(/^refs\/heads\//,"",b); print b "\t" d }
-          else if(det==1 && show_det==1){ print "(detached)\t" d }
-          d=""; b=""; det=0
-        }
-      }
-      /^worktree /{flush(); d=$2; next}
-      /^branch /  {b=$2; next}
-      /^detached/ {det=1; next}
-      /^$/        {flush()}
-      END         {flush()}
-    '
-  )"
+  local selectable porcelain
+  porcelain="$(git worktree list --porcelain 2>/dev/null)"
+  selectable="$(wt_parse_worktrees_porcelain ${include_detached} "$porcelain")"
 
   # Prepend New branch row
   selectable="➕ New branch…"$'\t'$'(create)'$'\n'"$selectable"
