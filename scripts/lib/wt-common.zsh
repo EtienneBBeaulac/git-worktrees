@@ -50,6 +50,30 @@ wt_parse_worktrees_porcelain() {
   ' <<< "$porcelain_text"
 }
 
+# Parse porcelain into pipe-delimited rows: path|branchShortOr(detached)|headSha
+# Detached entries have branch "(detached)" and include head sha.
+wt_parse_worktrees_table() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local porcelain_text="${1:-}"
+  [[ -z "$porcelain_text" ]] && porcelain_text="$(cat)"
+  awk '
+    BEGIN { path=""; head=""; br="" }
+    function flush() {
+      if (path != "") {
+        b = br
+        if (b == "") b = "(detached)"
+        sub(/^refs\/heads\//, "", b)
+        printf "%s|%s|%s\n", path, b, head
+      }
+    }
+    /^worktree / { flush(); path=$2; head=""; br=""; next }
+    /^HEAD /     { head=$2; next }
+    /^branch /   { br=$0; sub(/^branch /, "", br); next }
+    END { flush() }
+  ' <<< "$porcelain_text"
+}
+
 # Split a tab-delimited line into two fields via $reply array
 # Usage: wt_split_tab "A\tB"; echo ${reply[1]} ${reply[2]}
 wt_split_tab() {
@@ -72,17 +96,17 @@ wt_open_in_android_studio() {
     studio "$dir" >/dev/null 2>&1 || true
   else
     if [[ -d "$dir/.idea" ]]; then
-      open -a "$app_name" "$dir/.idea" >/dev/null 2>&1 || true
+      { open -a "$app_name" "$dir/.idea" >/dev/null 2>&1 || command -v xdg-open >/dev/null 2>&1 && xdg-open "$dir/.idea" >/dev/null 2>&1 || true; } || true
     elif [[ -f "$dir/settings.gradle" || -f "$dir/settings.gradle.kts" ]]; then
       local sg="$dir/settings.gradle"
       [[ -f "$dir/settings.gradle.kts" ]] && sg="$dir/settings.gradle.kts"
-      open -a "$app_name" "$sg" >/dev/null 2>&1 || true
+      { open -a "$app_name" "$sg" >/dev/null 2>&1 || command -v xdg-open >/dev/null 2>&1 && xdg-open "$sg" >/dev/null 2>&1 || true; } || true
     elif [[ -f "$dir/build.gradle" || -f "$dir/build.gradle.kts" ]]; then
       local bg="$dir/build.gradle"
       [[ -f "$dir/build.gradle.kts" ]] && bg="$dir/build.gradle.kts"
-      open -a "$app_name" "$bg" >/dev/null 2>&1 || true
+      { open -a "$app_name" "$bg" >/dev/null 2>&1 || command -v xdg-open >/dev/null 2>&1 && xdg-open "$bg" >/dev/null 2>&1 || true; } || true
     else
-      open -a "$app_name" "$dir" >/dev/null 2>&1 || true
+      { open -a "$app_name" "$dir" >/dev/null 2>&1 || command -v xdg-open >/dev/null 2>&1 && xdg-open "$dir" >/dev/null 2>&1 || true; } || true
     fi
   fi
 }

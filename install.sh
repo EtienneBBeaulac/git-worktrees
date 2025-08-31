@@ -15,7 +15,13 @@ prefix() { printf "%s" "[git-worktrees]"; }
 say()    { (( QUIET )) || echo "$(prefix) $*"; }
 ok()     { (( QUIET )) || echo "$(prefix) $*"; }
 err()    { echo "$(prefix) $*" >&2; }
-do_run() { if (( DRY_RUN )); then say "DRY: $*"; else eval "$@"; fi }
+do_run() {
+  if (( DRY_RUN )); then
+    say "DRY: $*"
+  else
+    "$@"
+  fi
+}
 
 say "Installing…"
 
@@ -32,7 +38,10 @@ fetch() {
   if (( DRY_RUN )); then
     return 0
   fi
-  curl -fsSL "$src" -o "$dst"
+  if ! curl -fsSL "$src" -o "$dst"; then
+    err "Failed to download $src"
+    return 1
+  fi
 }
 
 fetch "$REPO_RAW/scripts/wtnew"              "$PREFIX/wtnew.zsh"
