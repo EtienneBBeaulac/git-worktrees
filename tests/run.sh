@@ -37,7 +37,9 @@ REPO_RAW="file://$ROOT_DIR" DRY_RUN=1 QUIET=1 NO_SOURCE=1 bash "$ROOT_DIR/instal
 # 3) Verify installer would append source lines
 TMP_ZSHRC=$(mktemp)
 trap 'rm -f "$TMP_ZSHRC"' EXIT
-cp -f "$HOME/.zshrc" "$TMP_ZSHRC" || true
+if [[ -f "$HOME/.zshrc" ]]; then
+  cp -f "$HOME/.zshrc" "$TMP_ZSHRC" 2>/dev/null || true
+fi
 HOME_TMP=$(mktemp -d)
 trap 'rm -rf "$HOME_TMP"' EXIT
 mkdir -p "$HOME_TMP/.zsh/functions"

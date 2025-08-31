@@ -91,7 +91,8 @@ Env:
 Run the non-interactive test suite:
 
 ```bash
-bash tests/run.sh
+make test           # full suite
+make test-fast      # quick smoke (FAST_ONLY subset)
 ```
 
 ## Uninstall
