@@ -49,7 +49,7 @@ PREFIX="$HOME_TMP/.zsh/functions" QUIET=1 REPO_RAW="file://$ROOT_DIR" HOME="$HOM
 # Check presence of lines
 for f in wt.zsh wtnew.zsh wtrm.zsh wtopen.zsh wtls.zsh wt-common.zsh; do
   grep -Fq "$f" "$HOME_TMP/.zshrc" || { echo "Missing source for $f"; exit 1; }
-done
+fi
 
 echo "All tests passed."
 echo
@@ -78,3 +78,5 @@ zsh "$ROOT_DIR/tests/test_error_non_git_dir.zsh"
 zsh "$ROOT_DIR/tests/test_error_invalid_branch.zsh"
 zsh "$ROOT_DIR/tests/test_os_xdg_open.zsh"
 bash "$ROOT_DIR/tests/test_install_curl_fail.sh"
+bash "$ROOT_DIR/tests/test_install_yes_flag.sh"
+bash "$ROOT_DIR/tests/test_install_tag_checksum.sh"
