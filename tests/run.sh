@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
+# Normalize environment for deterministic behavior across OS/CI
+export LC_ALL=C LANG=C TZ=UTC
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TEMPLATE_DIR=/dev/null
+export PATH="$ROOT_DIR/tests/bin:$PATH"
 
 run() { echo "[TEST] $*"; "$@"; }
 

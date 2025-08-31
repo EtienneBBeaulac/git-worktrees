@@ -56,6 +56,11 @@ jobs:
       - name: Run full tests
         shell: bash
         run: |
+          echo "ZSH: $(zsh --version)" || true
+          echo "GIT: $(git --version)" || true
+          echo "AWK: $(awk --version 2>/dev/null | head -n1)" || true
+          echo "SED: $(sed --version 2>/dev/null | head -n1)" || true
+          echo "PATH: $PATH" || true
           bash tests/run.sh
 
 
