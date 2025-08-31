@@ -210,3 +210,61 @@ if [[ -o interactive ]] && whence -w compdef >/dev/null 2>&1; then
 fi
 
 
+# ----------------------
+# Centralized config load
+# ----------------------
+# Simple KEY=VALUE config loader with safe parsing; no eval, ignores comments.
+# Location precedence for file path: WT_CONFIG_PATH > $XDG_CONFIG_HOME/git-worktrees/config > $HOME/.config/git-worktrees/config
+# Access precedence per script should be: CLI flags > env vars > config > defaults.
+# This module only provides config-level defaults; scripts must handle flags/env.
+
+typeset -gA WT_CONFIG
+
+wt_find_config_file() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local cfg
+  if [[ -n ${WT_CONFIG_PATH:-} ]]; then
+    cfg="$WT_CONFIG_PATH"
+  elif [[ -n ${XDG_CONFIG_HOME:-} && -d ${XDG_CONFIG_HOME}/git-worktrees ]]; then
+    cfg="${XDG_CONFIG_HOME}/git-worktrees/config"
+  else
+    cfg="${HOME:-$PWD}/.config/git-worktrees/config"
+  fi
+  printf "%s" "$cfg"
+}
+
+wt_load_config() {
+  emulate -L zsh
+  setopt local_options pipefail
+  typeset -gA WT_CONFIG
+  WT_CONFIG=()
+  local file; file="$(wt_find_config_file)"
+  [[ -f "$file" ]] || return 0
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    [[ "$line" == \#* ]] && continue
+    # Accept KEY=VALUE, where VALUE may contain spaces; trim trailing CR
+    line="${line%$'\r'}"
+    key="${line%%=*}"
+    val="${line#*=}"
+    [[ -z "$key" ]] && continue
+    # Trim whitespace around key
+    key="${key##[[:space:]]*}"
+    key="${key%%[[:space:]]*}"
+    WT_CONFIG[$key]="$val"
+  done < "$file"
+}
+
+wt_get_config() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local key="$1" default_value="${2:-}"
+  if [[ -n ${WT_CONFIG[$key]:-} ]]; then
+    printf "%s" "${WT_CONFIG[$key]}"
+  else
+    printf "%s" "$default_value"
+  fi
+}
+

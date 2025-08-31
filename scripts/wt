@@ -24,14 +24,18 @@ wt() {
   local start_mode="list" include_detached=0 enter_default="${WTHUB_ENTER_DEFAULT:-}"
   local branch_arg="" FZF_MISSING=
 
-  # Simple config for persistence
-  local cfg_dir
-  cfg_dir="$HOME/.config/git-worktrees"
-  local cfg_file
-  cfg_file="$cfg_dir/hub"
+  # Centralized config: prefer runtime env/flags; fall back to config
+  typeset -gA WT_CONFIG
+  typeset cfg_file_hub
+  wt_load_config 2>/dev/null || true
+  enter_default="${enter_default:-${WTHUB_ENTER_DEFAULT:-}}"
   if [[ -z ${enter_default:-} ]]; then
-    if [[ -f "$cfg_file" ]]; then
-      enter_default="$(awk -F'=' '/^ENTER_DEFAULT=/{print $2}' "$cfg_file" | tail -n1)"
+    # Back-compat: also read historical hub file if present
+    cfg_file_hub="$HOME/.config/git-worktrees/hub"
+    if [[ -f "$cfg_file_hub" ]]; then
+      enter_default="$(awk -F'=' '/^ENTER_DEFAULT=/{print $2}' "$cfg_file_hub" | tail -n1)"
+    else
+      enter_default="$(wt_get_config WT_ENTER_BEHAVIOR open)"
     fi
   fi
   [[ -z ${enter_default:-} ]] && enter_default="open"
@@ -272,12 +276,12 @@ USAGE
     ctrl-e)
       # Toggle Enter default between open and menu, then re-run hub with same view
       if [[ "$enter_default" == "open" ]]; then
-        mkdir -p "$cfg_dir" 2>/dev/null || true
+        local cfg_dir; cfg_dir="$HOME/.config/git-worktrees"; local cfg_file; cfg_file="$cfg_dir/hub"
         mkdir -p "$cfg_dir" 2>/dev/null || true
         { printf "%s\n" "ENTER_DEFAULT=menu"; } > "$cfg_file" 2>/dev/null || true
         WTHUB_ENTER_DEFAULT=menu wt ${include_detached:+--detached} --start list
       else
-        mkdir -p "$cfg_dir" 2>/dev/null || true
+        local cfg_dir; cfg_dir="$HOME/.config/git-worktrees"; local cfg_file; cfg_file="$cfg_dir/hub"
         mkdir -p "$cfg_dir" 2>/dev/null || true
         { printf "%s\n" "ENTER_DEFAULT=open"; } > "$cfg_file" 2>/dev/null || true
         WTHUB_ENTER_DEFAULT=open wt ${include_detached:+--detached} --start list
