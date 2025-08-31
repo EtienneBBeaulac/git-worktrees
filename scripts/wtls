@@ -134,7 +134,9 @@ USAGE
       }
       # Test hook: record selection path for verification
       [[ -n ${TEST_TMP:-} ]] && { printf "%s\n" "$sel_dir" >> "${TEST_TMP}/open_calls.txt" 2>/dev/null || true; }
-      if command -v open >/dev/null 2>&1; then
+      if [[ -n ${WT_PREFER_XDG_OPEN:-} ]] && command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$sel_dir" >/dev/null 2>&1 || true
+      elif command -v open >/dev/null 2>&1; then
         open -a "$open_app" "$sel_dir" >/dev/null 2>&1 || true
       elif typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
         wt_open_in_android_studio "$sel_dir" "$open_app"

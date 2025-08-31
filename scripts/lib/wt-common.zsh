@@ -92,6 +92,11 @@ wt_open_in_android_studio() {
   emulate -L zsh
   setopt local_options pipefail
   local dir="$1" app_name="${2:-Android Studio}"
+  # Test/override: prefer xdg-open when requested
+  if [[ -n ${WT_PREFER_XDG_OPEN:-} ]] && command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$dir" >/dev/null 2>&1 || true
+    return 0
+  fi
   if command -v studio >/dev/null 2>&1; then
     studio "$dir" >/dev/null 2>&1 || true
   else

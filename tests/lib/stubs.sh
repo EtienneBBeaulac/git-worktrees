@@ -40,4 +40,13 @@ set -euo pipefail
 cat > "${TEST_TMP:-/tmp}/pbcopy.txt"
 EOF
   chmod +x "$dest/pbcopy"
+
+  # xdg-open: log target path similar to open
+  cat > "$dest/xdg-open" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf "%s\n" "$*" >> "${TEST_TMP:-/tmp}/xdgopen_calls.txt"
+exit 0
+EOF
+  chmod +x "$dest/xdg-open"
 }
