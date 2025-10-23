@@ -32,7 +32,7 @@ REPO_RAW="file://$PWD" bash install.sh
 
 ```bash
 brew tap etiennebbeaulac/tap
-brew install git-worktrees --HEAD
+brew install git-worktrees
 ```
 
 Then add to your `~/.zshrc`:
