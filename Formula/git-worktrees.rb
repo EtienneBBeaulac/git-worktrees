@@ -1,8 +1,8 @@
 class GitWorktrees < Formula
   desc "Simple shell helpers for Git worktrees with fzf integration"
   homepage "https://github.com/EtienneBBeaulac/git-worktrees"
-  url "https://github.com/EtienneBBeaulac/git-worktrees/archive/refs/tags/v1.0.2-test.tar.gz"
-  sha256 "68460641df601099cf9c1c08998c731812187947918de56d00e61ba7954abe6d"
+  url "https://github.com/EtienneBBeaulac/git-worktrees/archive/refs/tags/v1.0.1.tar.gz"
+  sha256 "4be2c0b1a25d3bb026ed623744883e80981b9ff1a7729ea9167be9b4a10cb4c2"
   license "MIT"
   
   head "https://github.com/EtienneBBeaulac/git-worktrees.git", branch: "main"
@@ -12,67 +12,48 @@ class GitWorktrees < Formula
   uses_from_macos "zsh"
 
   def install
-    # Install scripts to libexec
+    # Install library files to libexec
     libexec.install "scripts/wt"
     libexec.install "scripts/wtnew"
     libexec.install "scripts/wtrm"
     libexec.install "scripts/wtopen"
     libexec.install "scripts/wtls"
-    
-    # Install library files
     (libexec/"lib").install "scripts/lib/wt-common.zsh"
     (libexec/"lib").install "scripts/lib/wt-discovery.zsh" if File.exist?("scripts/lib/wt-discovery.zsh")
     (libexec/"lib").install "scripts/lib/wt-recovery.zsh" if File.exist?("scripts/lib/wt-recovery.zsh")
     (libexec/"lib").install "scripts/lib/wt-validation.zsh" if File.exist?("scripts/lib/wt-validation.zsh")
     
-    # Create wrapper scripts that source from the Homebrew installation
-    (prefix/"zsh-functions").mkpath
-    
+    # Create executable wrapper scripts in bin (automatically added to PATH)
     %w[wt wtnew wtrm wtopen wtls].each do |cmd|
-      (prefix/"zsh-functions/#{cmd}.zsh").write <<~EOS
+      (bin/cmd).write <<~EOS
+        #!/bin/zsh
         # Homebrew-installed git-worktrees
-        # Source the actual implementation
+        export WTRM__SCRIPT_DIR="#{libexec}"
+        export WTNEW__SCRIPT_DIR="#{libexec}"
+        export WTOPEN__SCRIPT_DIR="#{libexec}"
+        export WTLS__SCRIPT_DIR="#{libexec}"
+        export WT__SCRIPT_DIR="#{libexec}"
+        source "#{libexec}/lib/wt-common.zsh"
         source "#{libexec}/#{cmd}"
+        #{cmd} "$@"
       EOS
     end
-    
-    # Common library needs special handling for sourcing other libs
-    (prefix/"zsh-functions/wt-common.zsh").write <<~EOS
-      # Homebrew-installed git-worktrees
-      # Set library path for other modules
-      export WT_LIB_PATH="#{libexec}/lib"
-      # Source the actual implementation
-      source "#{libexec}/lib/wt-common.zsh"
-    EOS
   end
 
   def caveats
     <<~EOS
-      To use git-worktrees, add the following to your ~/.zshrc:
+      git-worktrees is now ready to use! Commands are in your PATH:
 
-        # Source git-worktrees functions
-        for func in #{opt_prefix}/zsh-functions/*.zsh; do
-          source "$func"
-        done
+        wt          # Hub to list, open, create, and manage worktrees
+        wtnew       # Create/open a worktree for a new or existing branch
+        wtopen      # Open an existing worktree
+        wtrm        # Safely remove a worktree
+        wtls        # List worktrees with status
 
-      Or individually:
-        source #{opt_prefix}/zsh-functions/wt-common.zsh
-        source #{opt_prefix}/zsh-functions/wt.zsh
-        source #{opt_prefix}/zsh-functions/wtnew.zsh
-        source #{opt_prefix}/zsh-functions/wtrm.zsh
-        source #{opt_prefix}/zsh-functions/wtopen.zsh
-        source #{opt_prefix}/zsh-functions/wtls.zsh
+      Try it now:
+        wt --help
 
-      Then restart your shell or run: source ~/.zshrc
-
-      Commands available:
-        wt                    # Hub to list, open, create, and manage worktrees
-        wtnew                 # Create/open a worktree for a new or existing branch
-        wtopen                # Open an existing worktree
-        wtrm                  # Safely remove a worktree
-        wtls                  # List worktrees with status
-
-      For more information, see: https://github.com/EtienneBBeaulac/git-worktrees
+      For more information: https://github.com/EtienneBBeaulac/git-worktrees
     EOS
   end
 
