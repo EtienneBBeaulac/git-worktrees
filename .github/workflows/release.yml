@@ -51,6 +51,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
+          draft: ${{ contains(github.ref, '-test') || contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
           body: |
             ## Installation
             
@@ -71,6 +73,8 @@ jobs:
   update-tap:
     needs: release
     runs-on: ubuntu-latest
+    # Skip tap update for test releases
+    if: "!contains(github.ref, '-test') && !contains(github.ref, '-alpha') && !contains(github.ref, '-beta') && !contains(github.ref, '-rc')"
     
     steps:
       - name: Checkout tap repository

@@ -108,16 +108,30 @@ If you prefer to run releases locally, use the `release.sh` script:
 
 ## Testing
 
-Test the workflow without creating a real release:
+Test the workflow safely without updating the tap:
 
 ```bash
-# Create a test tag
-git tag v0.0.0-test
-git push origin v0.0.0-test
+# Create a test tag (anything with -test, -alpha, -beta, or -rc)
+git tag v1.0.3-test
+git push origin v1.0.3-test
 
-# Check the workflow runs successfully
-# Then delete the test tag:
-git tag -d v0.0.0-test
-git push origin :refs/tags/v0.0.0-test
+# The workflow will:
+# ✅ Update Formula in main repo (safe to test)
+# ✅ Create a DRAFT release (not visible to users)
+# ❌ Skip updating the tap (prevents breaking production)
+
+# After verifying it works, clean up:
+git tag -d v1.0.3-test
+git push origin :refs/tags/v1.0.3-test
+# Then delete the draft release from GitHub
 ```
+
+### Test Tag Suffixes
+
+The workflow automatically handles these suffixes:
+- `-test` → Draft release, no tap update
+- `-alpha` → Pre-release, no tap update
+- `-beta` → Pre-release, no tap update  
+- `-rc` → Pre-release, no tap update
+- No suffix → Full release, updates tap
 
