@@ -15,10 +15,13 @@ wtnew() {
   fi
 
   local new_branch base_ref repo default_dir wt_dir
-  local open_ide=1 open_app="${WT_APP:-Android Studio}"
+  local open_ide=1 open_app=""
   local explicit_remote do_push=0 inside_ok=0
   local prefer_reuse=0 reuse_slot=0 skip_create=0
   local FZF_MISSING=
+  
+  # Load editor configuration and detect if not set
+  wt_load_editor_config 2>/dev/null || true
 
   # -------- flags (optional) --------
   while [[ $# -gt 0 ]]; do
@@ -32,6 +35,9 @@ wtnew() {
       --push)    do_push=1; shift;;
       --prefer-reuse) prefer_reuse=1; shift;;
       --inside-ok) inside_ok=1; shift;;
+      -v|--version)
+        echo "git-worktrees wtnew v${WT_VERSION:-unknown}"
+        return 0;;
       -h|--help)
         cat <<'USAGE'
 Usage: wtnew [options]
@@ -39,8 +45,8 @@ Usage: wtnew [options]
   -b, --base   Base ref (e.g., origin/main) when creating a brand-new branch
   -d, --dir    Worktree directory
   -r, --remote Remote to track/push (default: infer from base or origin)
-  --no-open    Do not launch Android Studio
-  --app        App name to open (default: "Android Studio")
+  --no-open    Do not open in editor/IDE
+  --app        App name to open (default: auto-detected)
   --push       Push new branch to the selected remote and set upstream
   --prefer-reuse  Prefer reusing an existing worktree slot (clean, safe) over creating a new dir
   --inside-ok  Allow creating a worktree path inside current repo (unsafe)
@@ -504,7 +510,18 @@ USAGE
 
   # -------- open IDE (reuse common helper when available) --------
   if (( open_ide )); then
-    echo "🚀  Opening Android Studio…"
+    # Detect editor if not specified
+    if [[ -z "$open_app" ]]; then
+      open_app="$(wt_get_editor 2>/dev/null)" || true
+    fi
+    
+    # Skip if user chose "none"
+    if [[ -z "$open_app" ]]; then
+      echo "ℹ️  Worktree ready at: $wt_dir"
+      return 0
+    fi
+    
+    echo "🚀  Opening in ${open_app}…"
     if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
       wt_open_in_android_studio "$wt_dir" "$open_app"
     else

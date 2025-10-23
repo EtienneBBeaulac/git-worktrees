@@ -14,10 +14,37 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - name: Get version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_NUMBER=${VERSION#v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION_NUMBER=$VERSION_NUMBER" >> $GITHUB_OUTPUT
+      
+      - name: Auto-update version in code
+        run: |
+          VERSION_NUMBER="${{ steps.version.outputs.VERSION_NUMBER }}"
+          echo "📝 Updating version to $VERSION_NUMBER in code..."
+          
+          # Update wt-common.zsh
+          sed -i 's/^typeset -g WT_VERSION=.*/typeset -g WT_VERSION="'"$VERSION_NUMBER"'"/' scripts/lib/wt-common.zsh
+          
+          # Check if anything changed
+          if ! git diff --quiet scripts/lib/wt-common.zsh; then
+            echo "✅ Version updated in scripts/lib/wt-common.zsh"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add scripts/lib/wt-common.zsh
+            git commit -m "chore: bump version to $VERSION_NUMBER [skip ci]"
+            git push origin HEAD:main
+            echo "✅ Pushed version update to main"
+          else
+            echo "ℹ️  Version already up to date"
+          fi
       
       - name: Wait for GitHub to generate tarball
         run: sleep 10

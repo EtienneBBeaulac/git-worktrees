@@ -5,6 +5,9 @@ emulate -L zsh
 unsetopt xtrace verbose
 typeset -g __WT_COMMON_SOURCED=1
 
+# Version (automatically updated by GitHub Actions on release)
+typeset -g WT_VERSION="1.0.3"
+
 # ============================================================================
 # Load enhanced modules (Phase 1: Core Infrastructure)
 # ============================================================================
@@ -386,4 +389,167 @@ wt_debug() {
 wt_info()  { emulate -L zsh; setopt local_options pipefail; printf "%s\n" "INF [$0:t] $*" >&2; }
 wt_warn()  { emulate -L zsh; setopt local_options pipefail; printf "%s\n" "WRN [$0:t] $*" >&2; }
 wt_error() { emulate -L zsh; setopt local_options pipefail; printf "%s\n" "ERR [$0:t] $*" >&2; }
+
+# ============================================================================
+# Smart Editor Detection (Phase 1 - v1.0.3)
+# ============================================================================
+
+# Detect the best editor/IDE to use
+# Priority: WT_EDITOR > WT_APP > VISUAL > EDITOR > GUI detection > fallback
+# Returns: editor name (e.g. "Visual Studio Code", "vim") or empty
+wt_detect_editor() {
+  emulate -L zsh
+  setopt local_options pipefail
+  
+  # 1. Explicit user preferences (highest priority)
+  if [[ -n ${WT_EDITOR:-} ]]; then
+    echo "$WT_EDITOR"
+    return 0
+  fi
+  
+  if [[ -n ${WT_APP:-} ]]; then
+    echo "$WT_APP"
+    return 0
+  fi
+  
+  # 2. Standard environment variables
+  if [[ -n ${VISUAL:-} ]]; then
+    echo "$VISUAL"
+    return 0
+  fi
+  
+  if [[ -n ${EDITOR:-} ]]; then
+    echo "$EDITOR"
+    return 0
+  fi
+  
+  # 3. Detect common GUI editors on macOS
+  if [[ "$OSTYPE" == darwin* ]]; then
+    local gui_editors=(
+      "Visual Studio Code"
+      "Code"
+      "Cursor"
+      "IntelliJ IDEA"
+      "IntelliJ IDEA CE"
+      "PyCharm"
+      "WebStorm"
+      "Android Studio"
+      "Sublime Text"
+      "Atom"
+      "TextMate"
+      "MacVim"
+    )
+    
+    for editor in "${gui_editors[@]}"; do
+      if [[ -d "/Applications/${editor}.app" ]]; then
+        echo "$editor"
+        return 0
+      fi
+    done
+  fi
+  
+  # 4. Check for command-line editors
+  local cli_editors=(code cursor idea pycharm webstorm vim nvim emacs nano)
+  for cmd in "${cli_editors[@]}"; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      echo "$cmd"
+      return 0
+    fi
+  done
+  
+  # 5. No editor found
+  echo ""
+  return 1
+}
+
+# Get the editor/app to use, with user prompt if none detected
+# Returns: editor name or empty (if user declines)
+wt_get_editor() {
+  emulate -L zsh
+  setopt local_options pipefail
+  
+  local detected
+  detected="$(wt_detect_editor)"
+  
+  if [[ -n "$detected" ]]; then
+    echo "$detected"
+    return 0
+  fi
+  
+  # No editor detected - ask user once and save preference
+  local config_dir="${HOME}/.config/git-worktrees"
+  local config_file="${config_dir}/config"
+  
+  echo "⚙️  No editor detected. What would you like to use?" >&2
+  echo "" >&2
+  echo "  1. Visual Studio Code" >&2
+  echo "  2. IntelliJ IDEA / PyCharm / WebStorm" >&2
+  echo "  3. Cursor" >&2
+  echo "  4. Sublime Text" >&2
+  echo "  5. vim / nvim (terminal)" >&2
+  echo "  6. Don't open editor automatically" >&2
+  echo "  7. I'll set it later (WT_EDITOR env var)" >&2
+  echo "" >&2
+  printf "Choice [1-7]: " >&2
+  
+  local choice
+  read -r choice
+  
+  local selected=""
+  case "$choice" in
+    1) selected="Visual Studio Code" ;;
+    2) selected="IntelliJ IDEA" ;;
+    3) selected="Cursor" ;;
+    4) selected="Sublime Text" ;;
+    5) selected="vim" ;;
+    6) selected="none" ;;
+    7) selected="" ;;
+    *) echo "Invalid choice. Skipping editor setup." >&2; return 1 ;;
+  esac
+  
+  # Save preference if user made a choice
+  if [[ -n "$selected" ]]; then
+    mkdir -p "$config_dir"
+    if [[ -f "$config_file" ]]; then
+      # Update or append
+      if grep -q "^editor=" "$config_file" 2>/dev/null; then
+        sed -i.bak "s|^editor=.*|editor=${selected}|" "$config_file" && rm -f "${config_file}.bak"
+      else
+        echo "editor=${selected}" >> "$config_file"
+      fi
+    else
+      cat > "$config_file" <<EOF
+# git-worktrees configuration
+# Edit this file or set WT_EDITOR environment variable
+
+editor=${selected}
+EOF
+    fi
+    echo "✅ Saved preference: $selected" >&2
+    echo "   Override anytime: export WT_EDITOR=\"your-editor\"" >&2
+  fi
+  
+  [[ "$selected" != "none" ]] && echo "$selected"
+  return 0
+}
+
+# Load editor from config if not already set via env var
+wt_load_editor_config() {
+  emulate -L zsh
+  setopt local_options pipefail
+  
+  # Already set via env var? Use that.
+  if [[ -n ${WT_EDITOR:-} ]] || [[ -n ${WT_APP:-} ]]; then
+    return 0
+  fi
+  
+  local config_file="${HOME}/.config/git-worktrees/config"
+  if [[ -f "$config_file" ]]; then
+    local saved_editor
+    saved_editor="$(grep "^editor=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+    if [[ -n "$saved_editor" && "$saved_editor" != "none" ]]; then
+      export WT_EDITOR="$saved_editor"
+    fi
+  fi
+}
 

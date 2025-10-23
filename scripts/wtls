@@ -20,8 +20,11 @@ wtls() {
   # Source common helpers if available
   local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
   [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
+  
+  # Load editor configuration
+  wt_load_editor_config 2>/dev/null || true
 
-  local use_fzf=0 do_open=0 open_app="${WT_APP:-Android Studio}" prune_stale=0
+  local use_fzf=0 do_open=0 open_app="" prune_stale=0
   local fast_mode=0
   # Env toggle for fast mode
   if [[ -n ${WT_FAST:-} && ${WT_FAST} != 0 && ${WT_FAST:l} != "false" ]]; then
@@ -37,13 +40,16 @@ wtls() {
       --app)         open_app="$2"; shift 2;;
       --prune-stale) prune_stale=1; shift;;
       --fast)        fast_mode=1; shift;;
+      -v|--version)
+        echo "git-worktrees wtls v${WT_VERSION:-unknown}"
+        return 0;;
       -h|--help)
         cat <<'USAGE'
 Usage: wtls [--fzf] [--open] [--app NAME] [--prune-stale] [--fast]
   --fzf          Interactive picker with preview
-  --open         When picking with --fzf, open the selected worktree in Android Studio
+  --open         When picking with --fzf, open the selected worktree in your editor
   --no-open      Do not open, even if --open is set (print path)
-  --app NAME     App to open (default: "Android Studio")
+  --app NAME     App to open (default: auto-detected)
   --prune-stale  Prune stale/prunable worktrees and exit
   --fast         Skip ahead/behind computation for speed
 USAGE
@@ -133,7 +139,14 @@ USAGE
     sel_branch="$(printf "%s\n" "$line" | awk -F"\t" '{print $1}')"
     sel_dir="$(printf "%s\n" "$line" | awk -F"\t" '{print $2}')"
     if (( do_open )); then
-      echo "🚀  Opening Android Studio…"
+      # Detect editor if not specified
+      if [[ -z "$open_app" ]]; then
+        open_app="$(wt_get_editor 2>/dev/null)" || true
+      fi
+      
+      if [[ -n "$open_app" ]]; then
+        echo "🚀  Opening in ${open_app}…"
+      fi
       [[ -n ${TEST_TMP:-} ]] && {
         {
           echo "sel_dir=$sel_dir"; echo "open_app=$open_app";

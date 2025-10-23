@@ -20,9 +20,12 @@ wtopen() {
   set +xv 2>/dev/null || true
 
   # helpers are sourced at load time
+  
+  # Load editor configuration
+  wt_load_editor_config 2>/dev/null || true
 
 
-  local branch_ref="" open_ide=1 open_app="${WT_APP:-Android Studio}"
+  local branch_ref="" open_ide=1 open_app=""
   local force_fzf=0 list_only=0 dry_run=0 prune_stale=0 exact_match=0 prefer_cwd=0
   local FZF_MISSING=
 
@@ -34,8 +37,8 @@ wtopen() {
 Usage: wtopen [branchOrRef] [options]
   --list         List worktrees with branches and exit
   --fzf          Force interactive picker even if branch provided
-  --no-open      Do not launch Android Studio (print path only)
-  --app NAME     App name to open (default: "Android Studio")
+  --no-open      Do not open in editor/IDE (print path only)
+  --app NAME     App name to open (default: auto-detected)
   --prune-stale  Prune stale/prunable worktrees and exit
   --dry-run      Show which directory would be opened; do not open
   --exact        Require exact branch match (no shortname normalization)
@@ -53,6 +56,9 @@ USAGE
       --dry-run)     dry_run=1; shift;;
       --exact)       exact_match=1; shift;;
       --cwd)         prefer_cwd=1; shift;;
+      -v|--version)
+        echo "git-worktrees wtopen v${WT_VERSION:-unknown}"
+        return 0;;
       *)
         if [[ -z $branch_ref ]]; then branch_ref="$1"; else echo "Unknown arg: $1"; return 2; fi
         shift;;
@@ -210,7 +216,18 @@ USAGE
   fi
 
   if (( open_ide )); then
-    echo "🚀  Opening Android Studio…"
+    # Detect editor if not specified
+    if [[ -z "$open_app" ]]; then
+      open_app="$(wt_get_editor 2>/dev/null)" || true
+    fi
+    
+    # Skip if user chose "none"
+    if [[ -z "$open_app" ]]; then
+      echo "ℹ️  Worktree is at: $target_dir"
+      return 0
+    fi
+    
+    echo "🚀  Opening in ${open_app}…"
     if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
       wt_open_in_android_studio "$target_dir" "$open_app"
     else

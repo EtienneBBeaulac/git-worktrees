@@ -20,6 +20,9 @@ wt() {
   set +xv 2>/dev/null || true
 
   # helpers are sourced at load time
+  
+  # Load editor configuration
+  wt_load_editor_config 2>/dev/null || true
 
   local start_mode="list" include_detached=0 enter_default="${WTHUB_ENTER_DEFAULT:-}"
   local branch_arg="" FZF_MISSING=
@@ -48,6 +51,9 @@ wt() {
         include_detached=1; shift;;
       --enter-default)
         enter_default="$2"; shift 2;;
+      -v|--version)
+        echo "git-worktrees wt v${WT_VERSION:-unknown}"
+        return 0;;
       -h|--help)
         cat <<'USAGE'
 Usage: wt [options] [branch]
@@ -81,11 +87,17 @@ USAGE
     rows="$(wt_parse_worktrees_porcelain 0 "$porcelain")"
     existing_dir="$(printf "%s\n" "$rows" | awk -F"\t" -v b="$br_short" '$1==b{print $2; exit}')"
     if [[ -n $existing_dir && -d $existing_dir ]]; then
-      if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
-        echo "🚀  Opening Android Studio…"
-        wt_open_in_android_studio "$existing_dir" "${WT_APP:-Android Studio}"
+      local detected_app
+      detected_app="$(wt_get_editor 2>/dev/null)" || true
+      if [[ -n "$detected_app" ]]; then
+        echo "🚀  Opening in ${detected_app}…"
+        if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
+          wt_open_in_android_studio "$existing_dir" "$detected_app"
+        else
+          open -a "$detected_app" "$existing_dir" >/dev/null 2>&1 || true
+        fi
       else
-        open -a "${WT_APP:-Android Studio}" "$existing_dir" >/dev/null 2>&1 || true
+        echo "ℹ️  Worktree is at: $existing_dir"
       fi
       return 0
     else
@@ -138,9 +150,15 @@ USAGE
     else
       local path; path="$(printf "%s" "$selectable" | awk -F"\t" -v b="$sel" '$1==b{print $2; exit}')"
       [[ -z $path ]] && { echo "❌ Unknown selection"; return 1; }
-      typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-        && wt_open_in_android_studio "$path" "${WT_APP:-Android Studio}" \
-        || open -a "${WT_APP:-Android Studio}" "$path" >/dev/null 2>&1 || true
+      local detected_app
+      detected_app="$(wt_get_editor 2>/dev/null)" || true
+      if [[ -n "$detected_app" ]]; then
+        typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+          && wt_open_in_android_studio "$path" "$detected_app" \
+          || open -a "$detected_app" "$path" >/dev/null 2>&1 || true
+      else
+        echo "ℹ️  Worktree is at: $path"
+      fi
       return 0
     fi
   fi
@@ -179,9 +197,15 @@ USAGE
           | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
         case "$outa" in
           ("Open")
-            typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-              && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
-              || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true;;
+            local detected_app
+            detected_app="$(wt_get_editor 2>/dev/null)" || true
+            if [[ -n "$detected_app" ]]; then
+              typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+                && wt_open_in_android_studio "$sel_path" "$detected_app" \
+                || open -a "$detected_app" "$sel_path" >/dev/null 2>&1 || true
+            else
+              echo "ℹ️  Worktree is at: $sel_path"
+            fi;;
           ("Show path") echo "$sel_path";;
           ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
           ("Remove all detached") typeset -f wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
@@ -197,9 +221,15 @@ USAGE
         esac
         return 0
       fi
-      typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-        && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
-        || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true
+      local detected_app
+      detected_app="$(wt_get_editor 2>/dev/null)" || true
+      if [[ -n "$detected_app" ]]; then
+        typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+          && wt_open_in_android_studio "$sel_path" "$detected_app" \
+          || open -a "$detected_app" "$sel_path" >/dev/null 2>&1 || true
+      else
+        echo "ℹ️  Worktree is at: $sel_path"
+      fi
       ;;
     ctrl-d)
       if typeset -f wtrm >/dev/null 2>&1; then
@@ -242,11 +272,17 @@ USAGE
       local act outa
       outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
         | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
-      case "$outa" in
+        case "$outa" in
         ("Open")
-          typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-            && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
-            || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true;;
+          local detected_app
+          detected_app="$(wt_get_editor 2>/dev/null)" || true
+          if [[ -n "$detected_app" ]]; then
+            typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+              && wt_open_in_android_studio "$sel_path" "$detected_app" \
+              || open -a "$detected_app" "$sel_path" >/dev/null 2>&1 || true
+          else
+            echo "ℹ️  Worktree is at: $sel_path"
+          fi;;
         ("Show path") echo "$sel_path";;
         ("Copy path")
           if command -v pbcopy >/dev/null 2>&1; then
@@ -297,9 +333,15 @@ HELP
       ;;
     *)
       # Default fallback: open
-      typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-        && wt_open_in_android_studio "$sel_path" "${WT_APP:-Android Studio}" \
-        || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true
+      local detected_app
+      detected_app="$(wt_get_editor 2>/dev/null)" || true
+      if [[ -n "$detected_app" ]]; then
+        typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
+          && wt_open_in_android_studio "$sel_path" "$detected_app" \
+          || open -a "$detected_app" "$sel_path" >/dev/null 2>&1 || true
+      else
+        echo "ℹ️  Worktree is at: $sel_path"
+      fi
       ;;
   esac
 }
