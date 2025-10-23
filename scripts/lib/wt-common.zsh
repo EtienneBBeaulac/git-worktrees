@@ -3,6 +3,24 @@
 
 typeset -g __WT_COMMON_SOURCED=1
 
+# ============================================================================
+# Load enhanced modules (Phase 1: Core Infrastructure)
+# ============================================================================
+__WT_LIB_DIR="${${(%):-%x}:A:h}"
+
+# Load recovery module (error recovery, retry, transaction log)
+[[ -f "$__WT_LIB_DIR/wt-recovery.zsh" ]] && source "$__WT_LIB_DIR/wt-recovery.zsh"
+
+# Load validation module (input validation, sanitization, fuzzy matching)
+[[ -f "$__WT_LIB_DIR/wt-validation.zsh" ]] && source "$__WT_LIB_DIR/wt-validation.zsh"
+
+# Load discovery module (help system, hints, cheatsheet)
+[[ -f "$__WT_LIB_DIR/wt-discovery.zsh" ]] && source "$__WT_LIB_DIR/wt-discovery.zsh"
+
+# ============================================================================
+# Original wt-common functionality
+# ============================================================================
+
 # Shorten a ref to a branch short name when possible
 wt_short_ref() {
   emulate -L zsh

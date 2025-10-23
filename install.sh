@@ -111,9 +111,10 @@ verify_checksums() {
   local name hash expected
   for dst in "$@"; do
     name=$(basename "$dst")
+    base_no_ext=${name%.zsh}
     hash=$(sha256_file "$dst")
-    # Accept entries matching scripts/<name>, scripts/lib/<name>, or just <name>
-    expected=$(awk -v n="$name" '{h=$1; $1=""; sub(/^ +/, "", $0); f=$0; if (f=="scripts/" n || f=="scripts/lib/" n || f==n) {print h}}' "$list" | tail -n1)
+    # Accept entries matching scripts/<name>, scripts/lib/<name>, just <name>, and variants without .zsh
+    expected=$(awk -v n="$name" -v m="$base_no_ext" '{h=$1; $1=""; sub(/^ +/, "", $0); f=$0; if (f=="scripts/" n || f=="scripts/lib/" n || f==n || f=="scripts/" m || f=="scripts/lib/" m || f==m) {print h}}' "$list" | tail -n1)
     if [[ -z "$expected" ]]; then
       err "No checksum entry for $name"; ok=0; continue
     fi

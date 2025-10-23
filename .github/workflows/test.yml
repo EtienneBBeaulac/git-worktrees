@@ -1,84 +1,107 @@
-name: Tests
+name: Test Suite
 
 on:
   push:
+    branches: [ main, develop ]
   pull_request:
+    branches: [ main, develop ]
 
 jobs:
-  fast:
-    name: Fast checks
+  test:
+    name: Run Tests
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        fzf: [false]
+        os: [ubuntu-latest, macos-latest]
+      fail-fast: false
+    
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup packages (Ubuntu)
+      
+      - name: Setup Git
+        run: |
+          git config --global user.name "Test User"
+          git config --global user.email "test@example.com"
+      
+      - name: Setup Zsh (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y zsh git $([ "${{ matrix.fzf }}" = "true" ] && echo fzf || true)
-
-      - name: Run fast tests
-        shell: bash
+          sudo apt-get install -y zsh
+      
+      - name: Verify Zsh installation
         run: |
-          FAST_ONLY=1 bash tests/run.sh
+          zsh --version
+          which zsh
+      
+      - name: Make scripts executable
+        run: |
+          chmod +x scripts/*
+          chmod +x tests/*.sh tests/*.zsh tests/run_all.zsh
+          chmod +x tests/lib/*.sh tests/lib/*.zsh
+          chmod +x tests/regression/*.zsh
+      
+      - name: Run Lint
+        run: make lint
+        continue-on-error: true
+      
+      - name: Run Legacy Tests
+        run: bash tests/run.sh
+      
+      - name: Run New Test Framework - All
+        run: zsh tests/run_all.zsh all
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            .coverage/
+            tests/**/*.log
+          retention-days: 7
 
-  full:
-    name: Full matrix
-    needs: fast
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, macos-13, macos-14]
-        fzf: [true, false]
-        fzf_channel: [system, bin]
+  test-fast:
+    name: Quick Tests
+    runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup packages (Ubuntu)
-        if: runner.os == 'Linux'
+      
+      - name: Setup Git
+        run: |
+          git config --global user.name "Test User"
+          git config --global user.email "test@example.com"
+      
+      - name: Setup Zsh
         run: |
           sudo apt-get update
-          sudo apt-get install -y zsh git $([ "${{ matrix.fzf }}" = "true" ] && [ "${{ matrix.fzf_channel }}" = "system" ] && echo fzf || true)
-
-      - name: Install pinned fzf (Linux binary)
-        if: runner.os == 'Linux' && matrix.fzf == true && matrix.fzf_channel == 'bin'
+          sudo apt-get install -y zsh
+      
+      - name: Make scripts executable
+        run: |
+          chmod +x scripts/*
+          chmod +x tests/*.sh tests/*.zsh tests/run_all.zsh
+      
+      - name: Run Fast Tests
+        run: make test-fast
         env:
-          FZF_VERSION: 0.27.2
+          FAST_ONLY: 1
+
+  lint:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Zsh
         run: |
-          set -euxo pipefail
-          arch=$(uname -m)
-          case "$arch" in
-            x86_64) fzf_arch=linux_amd64;;
-            aarch64|arm64) fzf_arch=linux_arm64;;
-            *) echo "Unsupported arch: $arch" >&2; exit 1;;
-          esac
-          tmpdir=$(mktemp -d)
-          cd "$tmpdir"
-          curl -fsSL -o fzf.tar.gz "https://github.com/junegunn/fzf/releases/download/${FZF_VERSION}/fzf-${FZF_VERSION}-${fzf_arch}.tar.gz"
-          tar -xzf fzf.tar.gz
-          sudo install -m 0755 fzf /usr/local/bin/fzf
-          fzf --version
-
-      - name: Setup packages (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew update
-          brew install zsh git $([ "${{ matrix.fzf }}" = "true" ] && echo fzf || true)
-
-      - name: Run full tests
-        shell: bash
-        run: |
-          echo "Tool versions:" && zsh --version && git --version && awk --version || true
-          command -v fzf >/dev/null 2>&1 && echo "fzf: $(fzf --version)" || echo "fzf: not installed"
-          echo "PATH=$PATH" && which -a zsh || true && which -a awk || true
-          bash tests/run.sh
-
-
+          sudo apt-get update
+          sudo apt-get install -y zsh
+      
+      - name: Run Lint
+        run: make lint

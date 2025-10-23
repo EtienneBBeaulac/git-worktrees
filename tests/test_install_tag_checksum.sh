@@ -10,9 +10,16 @@ mkdir -p "$TMP_HOME/.zsh/functions"
 
 # Create a fake checksum file that matches local files
 CSUM_FILE="$TMP_HOME/SHA256SUMS"
-{
-  (cd "$ROOT_DIR"; shasum -a 256 scripts/wt scripts/wtnew scripts/wtrm scripts/wtopen scripts/wtls scripts/lib/wt-common.zsh 2>/dev/null | sed -E 's#^([0-9a-f]+)\s+(.+)$#\1  scripts/\2#')
-} > "$CSUM_FILE"
+(
+  cd "$ROOT_DIR"
+  for p in scripts/wt scripts/wtnew scripts/wtrm scripts/wtopen scripts/wtls scripts/lib/wt-common.zsh; do
+    h=$(shasum -a 256 "$p" | awk '{print $1}')
+    printf "%s  %s\n" "$h" "$p"
+    # also provide basename variant
+    b=$(basename "$p")
+    printf "%s  %s\n" "$h" "$b"
+  done
+) > "$CSUM_FILE"
 
 # Dry-run ensures no error path on checksum; then run full
 PREFIX="$TMP_HOME/.zsh/functions" QUIET=1 HOME="$TMP_HOME" REPO_RAW="file://$ROOT_DIR" bash "$ROOT_DIR/install.sh" --checksum-file "$CSUM_FILE" --dry-run

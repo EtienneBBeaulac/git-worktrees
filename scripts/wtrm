@@ -33,6 +33,12 @@ wtrm() {
   setopt local_options pipefail no_xtrace
 
   # helpers are sourced at load time
+  
+  # Enable error recovery features
+  if typeset -f wt_recovery_enabled >/dev/null 2>&1 && wt_recovery_enabled; then
+    wt_transaction_begin
+    trap 'wt_transaction_rollback 2>/dev/null || true' EXIT INT TERM
+  fi
 
   local target_dir target_branch delete_branch=0 force=0 base_ref="" no_fzf=0 prune_only=0
   local rm_detached=0 assume_yes=0 jobs_opt=""
@@ -77,11 +83,25 @@ USAGE
     esac
   done
 
-  git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
+  if ! git rev-parse --git-dir &>/dev/null; then
+    echo "❌ Not a git repo"
+    if typeset -f wt_show_hints >/dev/null 2>&1; then
+      echo ""
+      echo "💡 Hint: Run this command from inside a git repository"
+    fi
+    return 1
+  fi
 
   # Keep remotes up-to-date (optional, consistent with wtnew)
   echo "🔄  Fetching remotes…"
-  git fetch --all --prune --tags --quiet || true
+  if ! git fetch --all --prune --tags --quiet 2>/dev/null; then
+    # Network failure - continue with cached refs
+    if typeset -f wt_diagnose_error >/dev/null 2>&1; then
+      echo "⚠️  Fetch failed, continuing with cached refs..."
+    else
+      true  # Continue silently
+    fi
+  fi
 
   if (( prune_only )); then
     echo "🧹 Pruning stale worktrees…"
@@ -336,8 +356,65 @@ USAGE
   local dirty
   dirty="$(git -C "$picked_path" status --porcelain --untracked-files=all 2>/dev/null)"
   if [[ -n "$dirty" && $force -eq 0 ]]; then
-    echo "❌ Worktree has uncommitted/untracked changes. Use --force to remove anyway."
-    return 1
+    echo "❌ Worktree has uncommitted/untracked changes."
+    
+    # Offer recovery options
+    if typeset -f wt_show_hints >/dev/null 2>&1; then
+      wt_show_hints untracked_changes "$picked_path"
+      echo ""
+      printf "💡 Options:\n"
+      echo "   [1] Commit changes now"
+      echo "   [2] Stash changes"  
+      echo "   [3] Use --force to remove anyway (⚠️  LOSES CHANGES)"
+      echo "   [4] Cancel"
+      printf "   Choice [1-4]: "
+      
+      local recovery_choice
+      read -r recovery_choice
+      
+      case "$recovery_choice" in
+        1)
+          echo ""
+          echo "📝 Committing changes in $picked_path..."
+          printf "Commit message: "
+          local commit_msg
+          read -r commit_msg
+          if [[ -n "$commit_msg" ]]; then
+            (cd "$picked_path" && git add -A && git commit -m "$commit_msg") || {
+              echo "❌ Commit failed"
+              return 1
+            }
+            echo "✅ Changes committed, continuing..."
+            dirty=""  # Clear dirty flag
+          else
+            echo "❌ Empty commit message, cancelled"
+            return 1
+          fi
+          ;;
+        2)
+          echo ""
+          echo "📦 Stashing changes in $picked_path..."
+          (cd "$picked_path" && git stash push -u -m "wtrm auto-stash $(date +%Y-%m-%d_%H:%M:%S)") || {
+            echo "❌ Stash failed"
+            return 1
+          }
+          echo "✅ Changes stashed, continuing..."
+          dirty=""  # Clear dirty flag
+          ;;
+        3)
+          echo ""
+          echo "⚠️  Forcing removal with uncommitted changes..."
+          force=1
+          ;;
+        *)
+          echo "❎ Cancelled"
+          return 1
+          ;;
+      esac
+    else
+      echo "   Use --force to remove anyway."
+      return 1
+    fi
   fi
 
   # 2) Ahead of upstream? If no upstream, allow removal (previous behavior/tests expect this)
@@ -349,8 +426,44 @@ USAGE
     behind="$(echo "$lr" | awk '{print $1}')"   # commits behind upstream
     ahead="$(echo  "$lr" | awk '{print $2}')"   # commits ahead of upstream
     if (( ahead > 0 && force == 0 )); then
-      echo "❌ Branch '$picked_branch' is ahead of '$upstream' by $ahead commit(s). Push or use --force."
-      return 1
+      echo "❌ Branch '$picked_branch' is ahead of '$upstream' by $ahead commit(s)."
+      
+      # Offer recovery options
+      if typeset -f wt_show_hints >/dev/null 2>&1; then
+        echo ""
+        printf "💡 Options:\n"
+        echo "   [1] Push commits now"
+        echo "   [2] Use --force to remove anyway (⚠️  LOSES COMMITS)"
+        echo "   [3] Cancel"
+        printf "   Choice [1-3]: "
+        
+        local recovery_choice
+        read -r recovery_choice
+        
+        case "$recovery_choice" in
+          1)
+            echo ""
+            echo "🌐 Pushing commits..."
+            (cd "$picked_path" && git push) || {
+              echo "❌ Push failed"
+              return 1
+            }
+            echo "✅ Commits pushed, continuing..."
+            ;;
+          2)
+            echo ""
+            echo "⚠️  Forcing removal with unpushed commits..."
+            force=1
+            ;;
+          *)
+            echo "❎ Cancelled"
+            return 1
+            ;;
+        esac
+      else
+        echo "   Push or use --force."
+        return 1
+      fi
     fi
   fi
 
@@ -358,9 +471,38 @@ USAGE
   echo "🗑  Removing worktree:"
   echo "    Path:   $picked_path"
   echo "    Branch: $picked_branch"
-  git worktree remove "${force:+--force}" "$picked_path" || {
-    echo "❌ Failed to remove worktree."; return 1;
-  }
+  
+  # Record transaction for potential rollback
+  if typeset -f wt_transaction_record >/dev/null 2>&1; then
+    wt_transaction_record "worktree_remove" "$picked_path"
+  fi
+  
+  if ! git worktree remove "${force:+--force}" "$picked_path" 2>/dev/null; then
+    echo "❌ Failed to remove worktree."
+    
+    # Diagnose and offer recovery
+    if typeset -f wt_diagnose_error >/dev/null 2>&1; then
+      echo ""
+      echo "💡 Possible causes:"
+      echo "   • Worktree is locked"
+      echo "   • Worktree is currently in use"
+      echo "   • Uncommitted changes (use --force)"
+      echo ""
+      printf "Try with --force? [y/N]: "
+      local try_force
+      read -r try_force
+      if [[ "${try_force:l}" == "y" ]]; then
+        git worktree remove --force "$picked_path" || {
+          echo "❌ Force removal also failed"
+          return 1
+        }
+      else
+        return 1
+      fi
+    else
+      return 1
+    fi
+  fi
 
   echo "🧹 Pruning stale entries…"
   git worktree prune
@@ -393,4 +535,10 @@ USAGE
   fi
 
   echo "✅ Done."
+  
+  # Commit transaction on success
+  if typeset -f wt_transaction_commit >/dev/null 2>&1; then
+    wt_transaction_commit
+    trap - EXIT INT TERM
+  fi
 }
