@@ -102,7 +102,7 @@ USAGE
       return 0
     else
       # Fallback to wtnew for creation
-      if typeset -f wtnew >/dev/null 2>&1; then
+      if command -v wtnew >/dev/null 2>&1; then
         wtnew -n "$br_short"
         return $?
       else
@@ -113,7 +113,7 @@ USAGE
 
   # Branch-first start (reuse wtnew)
   if [[ "$start_mode" == "new" ]]; then
-    if typeset -f wtnew >/dev/null 2>&1; then
+    if command -v wtnew >/dev/null 2>&1; then
       wtnew
       return $?
     else
@@ -143,7 +143,11 @@ USAGE
     printf "Pick a branch or 'New branch…': "; local sel; read -r sel
     [[ -z $sel ]] && { echo "❌ No selection"; return 1; }
     if [[ "$sel" == "➕ New branch"* ]]; then
-      typeset -f wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
+      if command -v wtnew >/dev/null 2>&1; then
+        wtnew
+      else
+        echo "❌ wtnew not available"
+      fi
       return $?
     elif [[ "$sel" == "🧵 Show detached"* ]]; then
       wt --detached --start list; return $?
@@ -178,7 +182,7 @@ USAGE
 
   # New branch row
   if [[ "$sel_branch" == "➕ New branch"* ]]; then
-    typeset -f wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
+    command -v wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
     return $?
   fi
 
@@ -207,9 +211,9 @@ USAGE
               echo "ℹ️  Worktree is at: $sel_path"
             fi;;
           ("Show path") echo "$sel_path";;
-          ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
-          ("Remove all detached") typeset -f wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
-          ("Prune stale") typeset -f wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
+          ("Remove") command -v wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
+          ("Remove all detached") command -v wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
+          ("Prune stale") command -v wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
           ("Set upstream (origin)")
             local b="${sel_branch}"; local remote="origin"
             if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
@@ -232,21 +236,21 @@ USAGE
       fi
       ;;
     ctrl-d)
-      if typeset -f wtrm >/dev/null 2>&1; then
+      if command -v wtrm >/dev/null 2>&1; then
         wtrm -d "$sel_path"
       else
         echo "❌ wtrm not available"
       fi
       ;;
     ctrl-p)
-      if typeset -f wtrm >/dev/null 2>&1; then
+      if command -v wtrm >/dev/null 2>&1; then
         wtrm --prune-only
       else
         git worktree prune -v || true
       fi
       ;;
     ctrl-n)
-      if typeset -f wtnew >/dev/null 2>&1; then
+      if command -v wtnew >/dev/null 2>&1; then
         # Choose creation mode
         local mode
         mode="$(printf "%s\n" "Create (smart reuse)" "Create (force reuse)" "Create (new dir)" \
@@ -261,7 +265,7 @@ USAGE
       fi
       ;;
     ctrl-r)
-      if typeset -f wtnew >/dev/null 2>&1; then
+      if command -v wtnew >/dev/null 2>&1; then
         wtnew --prefer-reuse
       else
         echo "❌ wtnew not available"
@@ -295,9 +299,9 @@ USAGE
           open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || echo "❌ Could not open terminal";;
         ("Print cd command")
           echo "cd '$sel_path'";;
-        ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
-        ("Remove all detached") typeset -f wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
-        ("Prune stale") typeset -f wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
+        ("Remove") command -v wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
+        ("Remove all detached") command -v wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
+        ("Prune stale") command -v wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
         ("Set upstream (origin)")
           local b="${sel_branch}"; local remote="origin"
           if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
