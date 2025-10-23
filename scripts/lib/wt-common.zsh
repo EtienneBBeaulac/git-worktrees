@@ -6,7 +6,7 @@ unsetopt xtrace verbose
 typeset -g __WT_COMMON_SOURCED=1
 
 # Version (automatically updated by GitHub Actions on release)
-typeset -g WT_VERSION="1.0.3-fix"
+typeset -g WT_VERSION="1.0.4"
 
 # ============================================================================
 # Load enhanced modules (Phase 1: Core Infrastructure)
