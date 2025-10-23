@@ -221,6 +221,68 @@ TUTORIAL
             local editor="${EDITOR:-${VISUAL:-vim}}"
             "$editor" "$config_file"
             ;;
+          set)
+            local config_file="${HOME}/.config/git-worktrees/config"
+            local key="$2"
+            local value="$3"
+            if [[ -z "$key" || -z "$value" ]]; then
+              echo "Usage: wt config set <key> <value>"
+              echo ""
+              echo "Common keys:"
+              echo "  editor                    - Default editor (e.g., \"Cursor\")"
+              echo "  behavior.autoopen         - Auto-open in editor (true/false)"
+              echo "  behavior.editor_prompt    - When to prompt (silent/always/first-time)"
+              return 1
+            fi
+            
+            # Create config if missing
+            if [[ ! -f "$config_file" ]]; then
+              if typeset -f wt_init_config >/dev/null 2>&1; then
+                wt_init_config >/dev/null 2>&1
+              else
+                mkdir -p "$(dirname "$config_file")"
+                cat > "$config_file" <<EOF
+# git-worktrees configuration
+editor=
+behavior.autoopen=true
+behavior.editor_prompt=silent
+EOF
+              fi
+            fi
+            
+            # Update or append the value
+            if grep -q "^${key}=" "$config_file" 2>/dev/null; then
+              sed -i.bak "s|^${key}=.*|${key}=${value}|" "$config_file" && rm -f "${config_file}.bak"
+              echo "✅ Updated: ${key}=${value}"
+            else
+              echo "${key}=${value}" >> "$config_file"
+              echo "✅ Added: ${key}=${value}"
+            fi
+            ;;
+          get)
+            local config_file="${HOME}/.config/git-worktrees/config"
+            local key="$2"
+            if [[ -z "$key" ]]; then
+              echo "Usage: wt config get <key>"
+              echo ""
+              echo "Example: wt config get editor"
+              return 1
+            fi
+            
+            if [[ ! -f "$config_file" ]]; then
+              echo "No config file found."
+              return 1
+            fi
+            
+            local value
+            value="$(grep "^${key}=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+            if [[ -n "$value" ]]; then
+              echo "$value"
+            else
+              echo "Key not found: $key" >&2
+              return 1
+            fi
+            ;;
           show|path)
             local config_file="${HOME}/.config/git-worktrees/config"
             if [[ -f "$config_file" ]]; then
@@ -237,17 +299,25 @@ TUTORIAL
 Usage: wt config <action>
 
 Actions:
-  show     Show current config (default)
-  edit     Edit config in $EDITOR
-  init     Initialize config with defaults
-  path     Show config file path
+  show         Show current config (default)
+  edit         Edit config in $EDITOR
+  init         Initialize config with defaults
+  set KEY VAL  Set a config value
+  get KEY      Get a config value
+  path         Show config file path
 
 Config file location: ~/.config/git-worktrees/config
 
+Common keys:
+  editor                    - Default editor (e.g., "Cursor")
+  behavior.autoopen         - Auto-open in editor (true/false)
+  behavior.editor_prompt    - When to prompt (silent/always/first-time)
+
 Examples:
-  wt config          # Show current config
-  wt config edit     # Edit in your editor
-  wt config init     # Create with defaults
+  wt config                           # Show current config
+  wt config edit                      # Edit in your editor
+  wt config set editor "Cursor"       # Set default editor
+  wt config get editor                # Get current editor
 CONFIGHELP
             ;;
         esac
@@ -633,7 +703,7 @@ FIRSTRUN
     ctrl-a)
       # Simple actions menu
       local act outa
-      outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
+      outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Change editor" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
         | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
         case "$outa" in
         ("Open")
@@ -658,6 +728,65 @@ FIRSTRUN
           open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || echo "❌ Could not open terminal";;
         ("Print cd command")
           echo "cd '$sel_path'";;
+        ("Change editor")
+          echo ""
+          echo "📂 Choose your default editor:"
+          echo "  1) Android Studio"
+          echo "  2) Visual Studio Code"
+          echo "  3) Cursor"
+          echo "  4) IntelliJ IDEA"
+          echo "  5) PyCharm"
+          echo "  6) WebStorm"
+          echo "  7) Sublime Text"
+          echo "  8) vim"
+          echo "  9) Don't auto-open (show path only)"
+          echo ""
+          printf "Choice [1-9]: "
+          local choice
+          read -r choice
+          
+          local selected=""
+          case "$choice" in
+            1) selected="Android Studio" ;;
+            2) selected="Visual Studio Code" ;;
+            3) selected="Cursor" ;;
+            4) selected="IntelliJ IDEA" ;;
+            5) selected="PyCharm" ;;
+            6) selected="WebStorm" ;;
+            7) selected="Sublime Text" ;;
+            8) selected="vim" ;;
+            9) selected="none" ;;
+            *) 
+              echo "⚠️  Invalid choice"
+              return 1
+              ;;
+          esac
+          
+          # Save to config
+          local config_file="${HOME}/.config/git-worktrees/config"
+          mkdir -p "$(dirname "$config_file")"
+          if [[ ! -f "$config_file" ]]; then
+            if typeset -f wt_init_config >/dev/null 2>&1; then
+              wt_init_config >/dev/null 2>&1
+            fi
+          fi
+          
+          if [[ -f "$config_file" ]]; then
+            if grep -q "^editor=" "$config_file" 2>/dev/null; then
+              sed -i.bak "s|^editor=.*|editor=${selected}|" "$config_file" && rm -f "${config_file}.bak"
+            else
+              echo "editor=${selected}" >> "$config_file"
+            fi
+          else
+            echo "editor=${selected}" > "$config_file"
+          fi
+          
+          if [[ "$selected" == "none" ]]; then
+            echo "✅ Configured: Show path only (no auto-open)"
+          else
+            echo "✅ Saved: $selected"
+          fi
+          ;;
         ("Remove") command -v wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
         ("Remove all detached") command -v wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
         ("Prune stale") command -v wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;

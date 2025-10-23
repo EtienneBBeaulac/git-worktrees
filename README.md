@@ -61,7 +61,10 @@ brew tap etiennebbeaulac/tap
 brew install git-worktrees
 ```
 
-**That's it!** Commands are immediately available. No configuration needed. ✨
+**That's it!** Commands are immediately available. ✨
+
+**First Run:**
+On your first use, git-worktrees will ask you to choose your default editor (VS Code, Cursor, IntelliJ IDEA, etc.). This one-time setup takes 5 seconds and you're good to go!
 
 ```bash
 wt --help  # Try it now!
@@ -119,7 +122,9 @@ wt list --fzf --open         # List and open selected in your editor
 wt remove                    # Interactive removal (includes "Remove all detached")
 wt remove -d ../repo-feature-x --delete-branch  # Remove and delete branch
 wt prune                     # Remove stale worktree references
-wt config edit               # Customize configuration
+wt config edit               # Edit configuration file
+wt config set editor "Cursor"  # Change your default editor
+wt config get editor         # Show current editor
 
 # Shorthand - same commands, less typing
 wtnew feature-x              # Same as: wt new feature-x
@@ -154,10 +159,10 @@ Environment variables:
 - `WT_DEBUG=1` – Print debug info
 
 Configuration file (`~/.config/git-worktrees/config`):
-- Auto-created with detected editor on first run
-- Customize behavior, editor, and UI settings
-- Manage with: `wt config edit`
-- Lower priority than env vars (env vars override config)
+- Auto-created on first run with your chosen editor
+- Manage with: `wt config edit`, `wt config set <key> <value>`, or `wt config get <key>`
+- Change editor anytime: `wt config set editor "Cursor"` or use Ctrl-A → "Change editor" in hub
+- Priority: flags > env vars > config file
 
 ## wtopen options
 
@@ -192,7 +197,7 @@ Env:
   - Enter: open (or actions when toggled); Ctrl-E toggles Enter between open/menu (persisted)
   - Ctrl-N: create (chooser: smart reuse / force reuse / new dir)
   - Ctrl-D: remove; Ctrl-P: prune stale; Ctrl-A: actions; Ctrl-O: open; Ctrl-H: help
-- Actions menu (Ctrl-A): Includes "Remove all detached" option for bulk removal
+- Actions menu (Ctrl-A): Includes "Change editor", "Remove all detached", and more
 - Flags: `--start list|new`, `--detached`, `--enter-default open|menu`
 - Env: `WTHUB_ENTER_DEFAULT=open|menu`, `WT_TERMINAL_APP` for "Open in terminal"
 

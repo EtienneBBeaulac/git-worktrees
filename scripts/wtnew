@@ -524,78 +524,7 @@ USAGE
       return 0
     fi
     
-    # Confirm editor choice (unless explicitly disabled)
-    if [[ -z ${WTNEW_SKIP_EDITOR_CONFIRM:-} ]]; then
-      printf "📂 Open in %s? [Y/n/other/save]: " "$open_app"
-      local response
-      read -r response
-      case "$response" in
-        n|N|no|No|NO)
-          echo "ℹ️  Worktree ready at: $wt_dir"
-          return 0
-          ;;
-        other|o|O)
-          # Show available editors
-          echo ""
-          echo "Available editors:"
-          local editors=(
-            "Visual Studio Code"
-            "Cursor"
-            "IntelliJ IDEA"
-            "PyCharm"
-            "WebStorm"
-            "Android Studio"
-            "Sublime Text"
-            "vim"
-            "none"
-          )
-          local i=1
-          for ed in "${editors[@]}"; do
-            printf "  %d) %s\n" "$i" "$ed"
-            ((i++))
-          done
-          printf "Choice [1-%d]: " "${#editors[@]}"
-          local choice
-          read -r choice
-          if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#editors[@]} )); then
-            open_app="${editors[$choice]}"
-            if [[ "$open_app" == "none" ]]; then
-              echo "ℹ️  Worktree ready at: $wt_dir"
-              return 0
-            fi
-            echo "✓ Using: $open_app"
-          else
-            echo "⚠️  Invalid choice, using ${open_app}"
-          fi
-          ;;
-        save|s|S)
-          # Save as default
-          local config_dir="${HOME}/.config/git-worktrees"
-          local config_file="${config_dir}/config"
-          mkdir -p "$config_dir"
-          if [[ -f "$config_file" ]]; then
-            if grep -q "^editor=" "$config_file" 2>/dev/null; then
-              sed -i.bak "s|^editor=.*|editor=${open_app}|" "$config_file" && rm -f "${config_file}.bak"
-            else
-              echo "editor=${open_app}" >> "$config_file"
-            fi
-          else
-            if typeset -f wt_init_config >/dev/null 2>&1; then
-              wt_init_config >/dev/null 2>&1
-              sed -i.bak "s|^editor=.*|editor=${open_app}|" "$config_file" && rm -f "${config_file}.bak"
-            else
-              echo "editor=${open_app}" > "$config_file"
-            fi
-          fi
-          echo "✓ Saved as default: $open_app"
-          echo "  (To skip this prompt: export WTNEW_SKIP_EDITOR_CONFIRM=1)"
-          ;;
-        *)
-          # Default: yes, continue with detected editor
-          ;;
-      esac
-    fi
-    
+    # Silent auto-open (no prompt)
     echo "🚀  Opening in ${open_app}…"
     if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
       wt_open_in_android_studio "$wt_dir" "$open_app"

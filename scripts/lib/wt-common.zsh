@@ -517,12 +517,108 @@ wt_detect_editor() {
   return 1
 }
 
-# Get the editor/app to use, with user prompt if none detected
-# Returns: editor name or empty (if user declines)
+# First-run editor setup (one time only)
+# Shows interactive menu and saves preference
+wt_first_run_editor_setup() {
+  emulate -L zsh
+  setopt local_options pipefail
+  
+  echo "" >&2
+  echo "👋 Welcome to git-worktrees!" >&2
+  echo "" >&2
+  echo "📂 Choose your default editor:" >&2
+  echo "  1) Android Studio" >&2
+  echo "  2) Visual Studio Code" >&2
+  echo "  3) Cursor" >&2
+  echo "  4) IntelliJ IDEA" >&2
+  echo "  5) PyCharm" >&2
+  echo "  6) WebStorm" >&2
+  echo "  7) Sublime Text" >&2
+  echo "  8) vim" >&2
+  echo "  9) Don't auto-open (show path only)" >&2
+  echo "" >&2
+  printf "Choice [1-9]: " >&2
+  
+  local choice
+  read -r choice
+  
+  local selected=""
+  case "$choice" in
+    1) selected="Android Studio" ;;
+    2) selected="Visual Studio Code" ;;
+    3) selected="Cursor" ;;
+    4) selected="IntelliJ IDEA" ;;
+    5) selected="PyCharm" ;;
+    6) selected="WebStorm" ;;
+    7) selected="Sublime Text" ;;
+    8) selected="vim" ;;
+    9) selected="none" ;;
+    *) 
+      echo "" >&2
+      echo "⚠️  Invalid choice. Using auto-detection." >&2
+      selected="auto"
+      ;;
+  esac
+  
+  # Save to config
+  local config_dir="${HOME}/.config/git-worktrees"
+  local config_file="${config_dir}/config"
+  mkdir -p "$config_dir"
+  
+  if [[ "$selected" == "auto" ]]; then
+    # Try to detect
+    selected="$(wt_detect_editor)"
+    [[ -z "$selected" ]] && selected="none"
+  fi
+  
+  # Create config with choice
+  if typeset -f wt_init_config >/dev/null 2>&1; then
+    wt_init_config >/dev/null 2>&1
+    if [[ -f "$config_file" ]]; then
+      sed -i.bak "s|^editor=.*|editor=${selected}|" "$config_file" && rm -f "${config_file}.bak"
+    fi
+  else
+    cat > "$config_file" <<EOF
+# git-worktrees configuration
+editor=${selected}
+behavior.autoopen=true
+behavior.editor_prompt=silent
+EOF
+  fi
+  
+  echo "" >&2
+  if [[ "$selected" == "none" ]]; then
+    echo "✅ Configured: Show path only (no auto-open)" >&2
+  else
+    echo "✅ Saved: $selected" >&2
+  fi
+  echo "" >&2
+  echo "  You can change this anytime:" >&2
+  echo "    wt config edit" >&2
+  echo "    wt config set editor \"Different Editor\"" >&2
+  echo "    export WT_EDITOR=\"Different Editor\"" >&2
+  echo "" >&2
+  printf "Press Enter to continue... " >&2
+  read -r
+  
+  [[ "$selected" != "none" ]] && echo "$selected"
+  return 0
+}
+
+# Get the editor/app to use
+# Returns: editor name or empty (if user chose "none")
 wt_get_editor() {
   emulate -L zsh
   setopt local_options pipefail
   
+  # Check if first run needed
+  local config_file="${HOME}/.config/git-worktrees/config"
+  if [[ ! -f "$config_file" ]]; then
+    wt_first_run_editor_setup
+    return $?
+  fi
+  
+  # Load from config or detect
   local detected
   detected="$(wt_detect_editor)"
   
@@ -531,61 +627,8 @@ wt_get_editor() {
     return 0
   fi
   
-  # No editor detected - ask user once and save preference
-  local config_dir="${HOME}/.config/git-worktrees"
-  local config_file="${config_dir}/config"
-  
-  echo "⚙️  No editor detected. What would you like to use?" >&2
-  echo "" >&2
-  echo "  1. Visual Studio Code" >&2
-  echo "  2. IntelliJ IDEA / PyCharm / WebStorm" >&2
-  echo "  3. Cursor" >&2
-  echo "  4. Sublime Text" >&2
-  echo "  5. vim / nvim (terminal)" >&2
-  echo "  6. Don't open editor automatically" >&2
-  echo "  7. I'll set it later (WT_EDITOR env var)" >&2
-  echo "" >&2
-  printf "Choice [1-7]: " >&2
-  
-  local choice
-  read -r choice
-  
-  local selected=""
-  case "$choice" in
-    1) selected="Visual Studio Code" ;;
-    2) selected="IntelliJ IDEA" ;;
-    3) selected="Cursor" ;;
-    4) selected="Sublime Text" ;;
-    5) selected="vim" ;;
-    6) selected="none" ;;
-    7) selected="" ;;
-    *) echo "Invalid choice. Skipping editor setup." >&2; return 1 ;;
-  esac
-  
-  # Save preference if user made a choice
-  if [[ -n "$selected" ]]; then
-    mkdir -p "$config_dir"
-    if [[ -f "$config_file" ]]; then
-      # Update or append
-      if grep -q "^editor=" "$config_file" 2>/dev/null; then
-        sed -i.bak "s|^editor=.*|editor=${selected}|" "$config_file" && rm -f "${config_file}.bak"
-      else
-        echo "editor=${selected}" >> "$config_file"
-      fi
-    else
-      cat > "$config_file" <<EOF
-# git-worktrees configuration
-# Edit this file or set WT_EDITOR environment variable
-
-editor=${selected}
-EOF
-    fi
-    echo "✅ Saved preference: $selected" >&2
-    echo "   Override anytime: export WT_EDITOR=\"your-editor\"" >&2
-  fi
-  
-  [[ "$selected" != "none" ]] && echo "$selected"
-  return 0
+  # No editor found
+  return 1
 }
 
 # Load editor from config if not already set via env var

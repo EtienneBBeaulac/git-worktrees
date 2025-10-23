@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-01-XX
+
+### Added
+
+#### First-Run Setup Experience
+- **One-time welcome menu** on first use: Choose from 9 popular editors (Android Studio, VS Code, Cursor, IntelliJ IDEA, PyCharm, WebStorm, Sublime Text, vim, or "Don't auto-open")
+- Takes 5 seconds, runs once, saves your preference
+- Clear instructions on how to change editor anytime
+
+#### Enhanced Config Management
+- **`wt config set <key> <value>`** - Set config values from CLI
+- **`wt config get <key>`** - Get current config values
+- Supports `editor`, `behavior.autoopen`, `behavior.editor_prompt` keys
+- Easy config updates without opening files
+
+#### Change Editor Anytime
+- **"Change editor" option in Ctrl-A actions menu** (wt hub)
+- Interactive menu with 9 popular editors
+- Instant save to config
+- No need to edit config file manually
+
+### Changed
+
+#### Silent Auto-Open (Major UX Improvement)
+- **Removed confusing confirmation prompt** from wtnew
+- Editor now opens automatically (silent)
+- Much faster, cleaner workflow
+- Change editor with: `wt config set editor "Different Editor"` or Ctrl-A → "Change editor"
+
+#### Simplified Workflow
+- First-time users: Choose editor once → Done
+- Regular users: Commands just work (no prompts)
+- Power users: `wt config set` for quick changes
+
+### Documentation
+- README updated with first-run setup info
+- Added config management examples
+- Highlighted editor change options
+- Updated hub actions menu documentation
+
+---
+
 ## [1.1.0] - 2025-01-XX
 
 ### Added
