@@ -10,38 +10,7 @@ Simple shell helpers for Git worktrees:
 
 ## Install
 
-### Option 1: Homebrew (Recommended)
-
-No tap required - install directly:
-
-```bash
-brew install --HEAD https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/Formula/git-worktrees.rb
-```
-
-Then add to your `~/.zshrc`:
-
-```bash
-# Source git-worktrees functions
-for func in $(brew --prefix git-worktrees)/zsh-functions/*.zsh; do
-  source "$func"
-done
-```
-
-Restart your shell or run: `source ~/.zshrc`
-
-**Updating:**
-```bash
-brew upgrade git-worktrees
-```
-
-**Uninstalling:**
-```bash
-brew uninstall git-worktrees
-```
-
-> **Note**: For alternative installation methods including creating a tap for easier updates, see [HOMEBREW_SIMPLE.md](HOMEBREW_SIMPLE.md)
-
-### Option 2: Install Script
+### Via Install Script
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/install.sh | bash
@@ -57,6 +26,30 @@ For local/offline testing, you can override downloads with a local repo path:
 
 ```bash
 REPO_RAW="file://$PWD" bash install.sh
+```
+
+### Via Homebrew
+
+```bash
+brew tap etiennebbeaulac/tap
+brew install git-worktrees --HEAD
+```
+
+Then add to your `~/.zshrc`:
+
+```bash
+# Source git-worktrees functions
+for func in $(brew --prefix git-worktrees)/zsh-functions/*.zsh; do
+  source "$func"
+done
+```
+
+Restart your shell or run: `source ~/.zshrc`
+
+**Updating:**
+```bash
+brew update
+brew upgrade git-worktrees
 ```
 
 ## Usage
@@ -130,16 +123,18 @@ make test-fast      # quick smoke (FAST_ONLY subset)
 
 ## Uninstall
 
-**Homebrew:**
-```bash
-brew uninstall git-worktrees
-```
-Then remove the sourcing lines from your `~/.zshrc`.
-
-**Install Script:**
+**Install script:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/uninstall.sh | bash
 ```
+
+**Homebrew:**
+```bash
+brew uninstall git-worktrees
+brew untap etiennebbeaulac/tap  # Optional
+```
+
+Then remove the sourcing lines from your `~/.zshrc`.
 
 License
 
