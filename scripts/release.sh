@@ -1,66 +1,115 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Simple release automation script
+# Usage: ./scripts/release.sh 1.0.2
+
 VERSION="${1:-}"
+
 if [[ -z "$VERSION" ]]; then
-  echo "Usage: $0 v1.0.0"
+  echo "Usage: $0 VERSION"
+  echo "Example: $0 1.0.2"
   exit 1
 fi
 
-echo "Creating release $VERSION..."
+# Add v prefix if not present
+if [[ ! "$VERSION" =~ ^v ]]; then
+  VERSION="v${VERSION}"
+fi
 
-# Verify clean state
-if [[ -n $(git status --porcelain) ]]; then
-  echo "Error: Working directory is not clean"
-  echo "Please commit or stash your changes first."
+echo "🚀 Releasing $VERSION..."
+echo ""
+
+# Check if we're on main and up to date
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$BRANCH" != "main" ]]; then
+  echo "❌ Must be on main branch (currently on $BRANCH)"
   exit 1
 fi
 
-# Verify tests pass
-echo "Running tests..."
-if ! make test; then
-  echo "Error: Tests failed"
+# Check for uncommitted changes
+if ! git diff-index --quiet HEAD --; then
+  echo "❌ You have uncommitted changes. Commit or stash them first."
   exit 1
 fi
 
-# Create tag
-echo "Creating tag..."
+# Pull latest
+echo "📥 Pulling latest changes..."
+git pull
+
+# Create and push tag
+echo "🏷️  Creating tag $VERSION..."
 git tag -a "$VERSION" -m "Release $VERSION"
-
-# Push tag
-echo "Pushing tag..."
 git push origin "$VERSION"
 
-# Wait for GitHub to process the tag
-echo "Waiting for GitHub to generate release tarball..."
+# Wait for GitHub to generate tarball
+echo "⏳ Waiting for GitHub to generate release tarball..."
 sleep 10
 
 # Calculate SHA256
-echo "Calculating SHA256..."
-SHA=$(curl -fsSL "https://github.com/EtienneBBeaulac/git-worktrees/archive/refs/tags/$VERSION.tar.gz" | shasum -a 256 | awk '{print $1}')
+echo "🔐 Calculating SHA256..."
+TARBALL_URL="https://github.com/EtienneBBeaulac/git-worktrees/archive/refs/tags/${VERSION}.tar.gz"
+SHA256=$(curl -fsSL "$TARBALL_URL" | shasum -a 256 | awk '{print $1}')
 
-echo ""
-echo "==================================="
-echo "Release $VERSION created!"
-echo "==================================="
-echo ""
-echo "Next steps:"
-echo "1. Create GitHub release:"
-echo "   https://github.com/EtienneBBeaulac/git-worktrees/releases/new?tag=$VERSION"
-echo ""
-echo "2. Update Homebrew formula with this SHA256:"
-echo "   sha256 \"$SHA\""
-echo ""
-echo "3. In your homebrew-tap repository:"
-echo "   - Update url to: https://github.com/EtienneBBeaulac/git-worktrees/archive/refs/tags/$VERSION.tar.gz"
-echo "   - Update sha256 to: $SHA"
-echo "   - Commit and push"
-echo ""
-echo "4. Test the formula:"
-echo "   brew uninstall git-worktrees"
-echo "   brew update"
-echo "   brew install etiennebbeaulac/tap/git-worktrees"
-echo "   brew test git-worktrees"
+if [[ -z "$SHA256" ]]; then
+  echo "❌ Failed to calculate SHA256"
+  exit 1
+fi
+
+echo "   SHA256: $SHA256"
 echo ""
 
+# Update Formula in main repo
+echo "📝 Updating Formula in main repo..."
+sed -i '' "s|url \".*\"|url \"${TARBALL_URL}\"|" Formula/git-worktrees.rb
+sed -i '' "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/git-worktrees.rb
 
+git add Formula/git-worktrees.rb
+if git diff --staged --quiet; then
+  echo "   No changes needed"
+else
+  git commit -m "chore: update Homebrew formula to $VERSION"
+  git push
+  echo "   ✅ Pushed to main repo"
+fi
+
+# Check if tap exists locally
+TAP_PATH="${HOME}/git/personal/homebrew-tap"
+if [[ ! -d "$TAP_PATH" ]]; then
+  echo ""
+  echo "⚠️  Tap repository not found at $TAP_PATH"
+  echo "   Manual update needed:"
+  echo "   1. Edit Formula/git-worktrees.rb in your tap"
+  echo "   2. Update url to: $TARBALL_URL"
+  echo "   3. Update sha256 to: $SHA256"
+  exit 0
+fi
+
+# Update Formula in tap
+echo "📝 Updating Formula in tap..."
+cd "$TAP_PATH"
+
+# Make sure tap is up to date
+git pull
+
+sed -i '' "s|url \".*\"|url \"${TARBALL_URL}\"|" Formula/git-worktrees.rb
+sed -i '' "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/git-worktrees.rb
+
+git add Formula/git-worktrees.rb
+if git diff --staged --quiet; then
+  echo "   No changes needed"
+else
+  git commit -m "Update git-worktrees to $VERSION"
+  git push
+  echo "   ✅ Pushed to tap"
+fi
+
+echo ""
+echo "✅ Release $VERSION complete!"
+echo ""
+echo "Users can now update with:"
+echo "  brew update"
+echo "  brew upgrade git-worktrees"
+echo ""
+echo "Create GitHub release at:"
+echo "  https://github.com/EtienneBBeaulac/git-worktrees/releases/new?tag=$VERSION"
