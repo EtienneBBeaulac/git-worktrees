@@ -1,8 +1,8 @@
 class GitWorktrees < Formula
   desc "Simple shell helpers for Git worktrees with fzf integration"
   homepage "https://github.com/EtienneBBeaulac/git-worktrees"
-  url "https://github.com/EtienneBBeaulac/git-worktrees/archive/refs/tags/v1.1.0.tar.gz"
-  sha256 "1e85f9f645165933af951545184ee32d987b83ed22675123c52948d6e77e472b"
+  url "https://github.com/EtienneBBeaulac/git-worktrees/archive/refs/tags/v1.1.1.tar.gz"
+  sha256 "4b29771970e46ea18c9fbb4085457ef46d5c1c59cd43b77fdc7ddd34678392de"
   license "MIT"
   
   head "https://github.com/EtienneBBeaulac/git-worktrees.git", branch: "main"
