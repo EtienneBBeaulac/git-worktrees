@@ -284,6 +284,12 @@ USAGE
     candidates="$wt_table"
   fi
 
+  # Check if there are any detached worktrees to show the bulk removal option
+  local has_detached=0
+  if printf "%s\n" "$wt_table" | awk -F'|' '$2=="(detached)"' | grep -q .; then
+    has_detached=1
+  fi
+
   # If target_dir provided, select that; else pick interactively or prompt
   local picked_path picked_branch picked_head
   if [[ -n "$target_dir" ]]; then
@@ -314,12 +320,24 @@ USAGE
     display="$(printf "%s\n" "$candidates" \
       | awk -F'|' '{b=$2; h=$3; if (b=="(detached)") b=b "@" substr(h,1,7); printf "%-40s  %s\n", b, $1}')"
 
+    # Prepend bulk removal option if there are detached worktrees
+    if (( has_detached )); then
+      display="🗑️  Remove all detached…"$'\t'"(bulk-remove)"$'\n'"$display"
+    fi
+
     if (( no_fzf )) || [[ -n $FZF_MISSING ]]; then
       echo "🧭 Select a worktree to remove:"
       printf "%s\n" "$display"
-      printf "Choice (type full path): "
+      printf "Choice (type full path or 'bulk-remove'): "
       read -r picked_path
       [[ -z "$picked_path" ]] && { echo "❌ No selection."; return 1; }
+      
+      # Handle bulk removal option
+      if [[ "$picked_path" == "(bulk-remove)" ]]; then
+        wtrm --rm-detached
+        return $?
+      fi
+      
       picked_branch="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
       picked_head="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"
     else
@@ -328,6 +346,17 @@ USAGE
         | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
               --prompt="🧹 Remove worktree: " \
               --preview '
+                  line="{}"
+                  # Check if this is the bulk-remove option
+                  if echo "$line" | grep -q "Remove all detached"; then
+                    echo "Bulk removal option"
+                    echo ""
+                    echo "This will remove all detached worktrees"
+                    echo "(worktrees not on any branch)."
+                    echo ""
+                    echo "You will be prompted for confirmation."
+                    exit 0
+                  fi
                   path=$(echo {} | awk "{print $NF}")
                   if [[ -d "$path" ]]; then
                     printf "Path: %s\n\n" "$path"
@@ -340,6 +369,13 @@ USAGE
                   fi
               ' \
               --preview-window=right,60%)" || { echo "❌ No selection."; return 1; }
+      
+      # Handle bulk removal option
+      if echo "$pick_out" | grep -q "Remove all detached"; then
+        wtrm --rm-detached
+        return $?
+      fi
+      
       picked_path="$(printf "%s" "$pick_out" | awk '{print $NF}')"
       picked_branch="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $2}')"
       picked_head="$(printf "%s\n" "$wt_table" | awk -F'|' -v p="$picked_path" '$1==p{print $3}')"

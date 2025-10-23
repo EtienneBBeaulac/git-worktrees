@@ -4,6 +4,7 @@
 
 emulate -L zsh
 setopt local_options pipefail
+unsetopt xtrace verbose
 
 # ============================================================================
 # Help System
@@ -563,11 +564,13 @@ wt_help_interactive() {
 }
 
 # ============================================================================
-# Export Functions
+# Export Functions (silently)
 # ============================================================================
 
-typeset -gf wt_show_contextual_help wt_show_examples wt_show_hints
-typeset -gf wt_cheatsheet wt_discover_features
-typeset -gf wt_has_feature wt_feature_status
-typeset -gf wt_help_interactive
+{
+  typeset -gf wt_show_contextual_help wt_show_examples wt_show_hints
+  typeset -gf wt_cheatsheet wt_discover_features
+  typeset -gf wt_has_feature wt_feature_status
+  typeset -gf wt_help_interactive
+} >/dev/null 2>&1
 

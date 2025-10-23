@@ -4,6 +4,7 @@
 
 emulate -L zsh
 setopt local_options pipefail
+unsetopt xtrace verbose
 
 # ============================================================================
 # Branch Name Validation
@@ -444,16 +445,18 @@ wt_suggest_branch_corrections() {
 }
 
 # ============================================================================
-# Export Functions
+# Export Functions (silently)
 # ============================================================================
 
-typeset -gf wt_validate_branch_name wt_validate_branch_name_error
-typeset -gf wt_sanitize_branch_name
-typeset -gf wt_fuzzy_match_branch wt_string_distance
-typeset -gf wt_validate_path wt_validate_path_error
-typeset -gf wt_sanitize_path
-typeset -gf wt_ref_exists wt_branch_exists wt_remote_branch_exists
-typeset -gf wt_worktree_exists wt_branch_checked_out
-typeset -gf wt_prompt_branch_name wt_prompt_path
-typeset -gf wt_suggest_branch_corrections
+{
+  typeset -gf wt_validate_branch_name wt_validate_branch_name_error
+  typeset -gf wt_sanitize_branch_name
+  typeset -gf wt_fuzzy_match_branch wt_string_distance
+  typeset -gf wt_validate_path wt_validate_path_error
+  typeset -gf wt_sanitize_path
+  typeset -gf wt_ref_exists wt_branch_exists wt_remote_branch_exists
+  typeset -gf wt_worktree_exists wt_branch_checked_out
+  typeset -gf wt_prompt_branch_name wt_prompt_path
+  typeset -gf wt_suggest_branch_corrections
+} >/dev/null 2>&1
 

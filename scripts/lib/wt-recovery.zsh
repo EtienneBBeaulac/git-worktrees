@@ -4,6 +4,7 @@
 
 emulate -L zsh
 setopt local_options pipefail
+unsetopt xtrace verbose
 
 # ============================================================================
 # Retry Mechanism
@@ -461,12 +462,14 @@ wt_max_retries() {
   echo "${WT_MAX_RECOVERY_ATTEMPTS:-3}"
 }
 
-# Export functions for use
-typeset -gf wt_retry wt_retry_with_prompt
-typeset -gf wt_diagnose_error wt_error_message wt_offer_recovery
-typeset -gf wt_save_session wt_restore_session wt_session_is_recent
-typeset -gf wt_clear_session wt_offer_resume
-typeset -gf wt_transaction_begin wt_transaction_record
-typeset -gf wt_transaction_commit wt_transaction_rollback
-typeset -gf wt_recovery_enabled wt_max_retries
+# Export functions for use (silently)
+{
+  typeset -gf wt_retry wt_retry_with_prompt
+  typeset -gf wt_diagnose_error wt_error_message wt_offer_recovery
+  typeset -gf wt_save_session wt_restore_session wt_session_is_recent
+  typeset -gf wt_clear_session wt_offer_resume
+  typeset -gf wt_transaction_begin wt_transaction_record
+  typeset -gf wt_transaction_commit wt_transaction_rollback
+  typeset -gf wt_recovery_enabled wt_max_retries
+} >/dev/null 2>&1
 

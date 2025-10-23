@@ -174,7 +174,7 @@ USAGE
       if [[ "$enter_default" == "menu" ]]; then
         # Open actions menu instead of opening directly
         local outa
-        outa="$(printf "%s\n" "Open" "Show path" "Remove" "Prune stale" "Set upstream (origin)" \
+        outa="$(printf "%s\n" "Open" "Show path" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
           | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
         case "$outa" in
           ("Open")
@@ -183,6 +183,7 @@ USAGE
               || open -a "${WT_APP:-Android Studio}" "$sel_path" >/dev/null 2>&1 || true;;
           ("Show path") echo "$sel_path";;
           ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
+          ("Remove all detached") typeset -f wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
           ("Prune stale") typeset -f wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
           ("Set upstream (origin)")
             local b="${sel_branch}"; local remote="origin"
@@ -238,7 +239,7 @@ USAGE
     ctrl-a)
       # Simple actions menu
       local act outa
-      outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Remove" "Prune stale" "Set upstream (origin)" \
+      outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
         | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
       case "$outa" in
         ("Open")
@@ -258,6 +259,7 @@ USAGE
         ("Print cd command")
           echo "cd '$sel_path'";;
         ("Remove") typeset -f wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
+        ("Remove all detached") typeset -f wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
         ("Prune stale") typeset -f wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
         ("Set upstream (origin)")
           local b="${sel_branch}"; local remote="origin"

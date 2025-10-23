@@ -1,6 +1,8 @@
 #!/usr/bin/env zsh
 # wt-common: shared helpers for git-worktrees tools (zsh)
 
+emulate -L zsh
+unsetopt xtrace verbose
 typeset -g __WT_COMMON_SOURCED=1
 
 # ============================================================================

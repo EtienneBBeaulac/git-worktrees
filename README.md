@@ -59,8 +59,9 @@ wtnew
 wtnew -n feature/x -b origin/main --no-open
 wtopen feature/x   # open existing worktree for branch (or picker with no args)
 wtls --fzf --open  # list worktrees and open selected in Android Studio
-wtrm
+wtrm               # interactive picker (includes "Remove all detached" option)
 wtrm -d ../repo-feature-x --delete-branch
+wtrm --rm-detached --yes  # bulk remove all detached worktrees
 ```
 
 ## Requirements
@@ -109,6 +110,7 @@ Env:
   - Enter: open (or actions when toggled); Ctrl-E toggles Enter between open/menu (persisted)
   - Ctrl-N: create (chooser: smart reuse / force reuse / new dir)
   - Ctrl-D: remove; Ctrl-P: prune stale; Ctrl-A: actions; Ctrl-O: open; Ctrl-H: help
+- Actions menu (Ctrl-A): Includes "Remove all detached" option for bulk removal
 - Flags: `--start list|new`, `--detached`, `--enter-default open|menu`
 - Env: `WTHUB_ENTER_DEFAULT=open|menu`, `WT_TERMINAL_APP` for "Open in terminal"
 
