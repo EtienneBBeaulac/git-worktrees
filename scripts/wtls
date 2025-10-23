@@ -58,7 +58,14 @@ USAGE
     esac
   done
 
-  git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
+  if ! git rev-parse --git-dir &>/dev/null; then
+    if typeset -f wt_error_not_git_repo >/dev/null 2>&1; then
+      wt_error_not_git_repo
+    else
+      echo "❌ Not a git repository" >&2
+    fi
+    return 1
+  fi
 
   if (( prune_stale )); then
     echo "🧹  Pruning stale worktrees…"
@@ -144,7 +151,9 @@ USAGE
         open_app="$(wt_get_editor 2>/dev/null)" || true
       fi
       
-      if [[ -n "$open_app" ]]; then
+      if [[ -z "$open_app" ]]; then
+        echo "ℹ️  Worktree is at: $sel_dir"
+      else
         echo "🚀  Opening in ${open_app}…"
       fi
       [[ -n ${TEST_TMP:-} ]] && {

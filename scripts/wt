@@ -24,6 +24,293 @@ wt() {
   # Load editor configuration
   wt_load_editor_config 2>/dev/null || true
 
+  # ============================================================================
+  # Subcommand Dispatch (Phase 2 - v1.1.0)
+  # ============================================================================
+  
+  # Special case: --tutorial flag (show interactive tutorial)
+  if [[ "$1" == "--tutorial" ]]; then
+    cat <<'TUTORIAL'
+
+╔═══════════════════════════════════════════════════════════════╗
+║            Welcome to git-worktrees! (1/4)                    ║
+╚═══════════════════════════════════════════════════════════════╝
+
+What are worktrees?
+───────────────────
+Git worktrees let you check out multiple branches at once.
+
+Instead of constantly switching branches:
+  $ git checkout feature
+  $ git checkout main
+  $ git checkout bugfix
+
+You have separate directories:
+  ~/code/repo/          → main branch
+  ~/code/repo-feature/  → feature branch
+  ~/code/repo-bugfix/   → bugfix branch
+
+All active at the same time! 🎉
+
+Benefits:
+  ✓ No need to stash/unstash
+  ✓ Work on multiple features simultaneously
+  ✓ Keep builds running while you code
+  ✓ Compare branches side-by-side
+
+TUTORIAL
+    printf "\nPress Enter to continue, or 'q' to quit... "
+    read -r response
+    [[ "$response" == "q" ]] && return 0
+
+    cat <<'TUTORIAL'
+
+╔═══════════════════════════════════════════════════════════════╗
+║               Creating Worktrees (2/4)                        ║
+╚═══════════════════════════════════════════════════════════════╝
+
+To create your first worktree:
+
+  $ wt new feature-branch
+
+This will:
+  1. Create branch 'feature-branch' (if it doesn't exist)
+  2. Create directory '../repo-feature-branch/'
+  3. Check out the branch there
+  4. Open in your editor (auto-detected)
+
+Advanced options:
+  $ wt new feature -b main       # Create from 'main' branch
+  $ wt new feature --no-open     # Don't open editor
+  $ wt new feature --push        # Also push to remote
+
+TUTORIAL
+    printf "\nPress Enter to continue... "
+    read -r response
+    [[ "$response" == "q" ]] && return 0
+
+    cat <<'TUTORIAL'
+
+╔═══════════════════════════════════════════════════════════════╗
+║              Managing Worktrees (3/4)                         ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Key commands:
+────────────
+  wt                # Interactive hub (fuzzy find)
+  wt new <name>     # Create worktree
+  wt open <name>    # Open existing worktree
+  wt remove         # Remove worktree (safe, with checks)
+  wt list           # Show all worktrees with status
+
+Keyboard shortcuts in 'wt' hub:
+────────────────────────────────
+  Enter   → Open selected worktree
+  Ctrl-N  → Create new worktree
+  Ctrl-D  → Remove worktree
+  Ctrl-A  → Actions menu
+  Ctrl-P  → Prune stale worktrees
+  Ctrl-H  → Show help
+
+TUTORIAL
+    printf "\nPress Enter to continue... "
+    read -r response
+    [[ "$response" == "q" ]] && return 0
+
+    cat <<'TUTORIAL'
+
+╔═══════════════════════════════════════════════════════════════╗
+║                 You're Ready! (4/4)                           ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Quick start workflow:
+────────────────────
+  1. Run 'wt new my-feature' to create your first worktree
+  2. Work in the new worktree directory
+  3. Run 'wt' anytime to switch between worktrees
+  4. Use 'wt remove' when you're done with a branch
+
+Tips:
+─────
+  • Each worktree is independent - changes don't affect others
+  • You can have multiple IDE windows open, one per worktree
+  • Worktrees share the same .git database (efficient!)
+  • Great for reviewing PRs while keeping your work intact
+
+More help:
+──────────
+  wt help           # Full documentation
+  wt new --help     # Command-specific help
+  wt remove --help  # More options
+
+Happy coding! ✨
+
+TUTORIAL
+    return 0
+  fi
+  
+  # Check if first arg is a subcommand (git-style: wt new, wt remove, etc.)
+  if [[ $# -gt 0 ]]; then
+    case "$1" in
+      new|n)
+        shift
+        if command -v wtnew >/dev/null 2>&1; then
+          wtnew "$@"
+          return $?
+        else
+          echo "❌ wtnew command not found"; return 1
+        fi
+        ;;
+      remove|rm)
+        shift
+        if command -v wtrm >/dev/null 2>&1; then
+          wtrm "$@"
+          return $?
+        else
+          echo "❌ wtrm command not found"; return 1
+        fi
+        ;;
+      open|o)
+        shift
+        if command -v wtopen >/dev/null 2>&1; then
+          wtopen "$@"
+          return $?
+        else
+          echo "❌ wtopen command not found"; return 1
+        fi
+        ;;
+      list|ls)
+        shift
+        if command -v wtls >/dev/null 2>&1; then
+          wtls "$@"
+          return $?
+        else
+          echo "❌ wtls command not found"; return 1
+        fi
+        ;;
+      prune)
+        shift
+        if command -v wtrm >/dev/null 2>&1; then
+          wtrm --prune-only "$@"
+          return $?
+        else
+          git worktree prune -v
+          return $?
+        fi
+        ;;
+      config)
+        shift
+        local action="${1:-show}"
+        case "$action" in
+          init)
+            if typeset -f wt_init_config >/dev/null 2>&1; then
+              wt_init_config
+            else
+              echo "❌ Config initialization not available"
+              return 1
+            fi
+            ;;
+          edit)
+            local config_file="${HOME}/.config/git-worktrees/config"
+            if [[ ! -f "$config_file" ]]; then
+              echo "⚠️  Config file doesn't exist. Creating it..."
+              if typeset -f wt_init_config >/dev/null 2>&1; then
+                wt_init_config
+              fi
+            fi
+            local editor="${EDITOR:-${VISUAL:-vim}}"
+            "$editor" "$config_file"
+            ;;
+          show|path)
+            local config_file="${HOME}/.config/git-worktrees/config"
+            if [[ -f "$config_file" ]]; then
+              echo "Config file: $config_file"
+              echo ""
+              cat "$config_file"
+            else
+              echo "No config file found."
+              echo "Run 'wt config init' to create one."
+            fi
+            ;;
+          *)
+            cat <<'CONFIGHELP'
+Usage: wt config <action>
+
+Actions:
+  show     Show current config (default)
+  edit     Edit config in $EDITOR
+  init     Initialize config with defaults
+  path     Show config file path
+
+Config file location: ~/.config/git-worktrees/config
+
+Examples:
+  wt config          # Show current config
+  wt config edit     # Edit in your editor
+  wt config init     # Create with defaults
+CONFIGHELP
+            ;;
+        esac
+        return 0
+        ;;
+      help|h)
+        # Show comprehensive help with subcommands
+        cat <<'HELP'
+git-worktrees - Manage Git worktrees with ease
+
+Usage:
+  wt [options]                 Interactive worktree hub (fuzzy find)
+  wt <branch>                  Quick open/create worktree for branch
+  wt <subcommand> [args]       Run subcommand
+
+Subcommands:
+  new, n       Create/open worktree for a branch
+  open, o      Open existing worktree
+  remove, rm   Remove worktree safely
+  list, ls     List all worktrees with status
+  prune        Remove stale worktree references
+  config       Manage configuration
+  help, h      Show this help
+
+Hub Options:
+  --start list|new             Start in list or branch-first mode
+  --detached                   Include detached worktrees
+  --enter-default open|menu    Default Enter key behavior
+  -v, --version                Show version
+  -h, --help                   Show help
+
+Examples:
+  wt                          # Interactive hub
+  wt feature                  # Quick open 'feature' branch
+  wt new feature              # Create worktree for 'feature'
+  wt new feature -b main      # Create from 'main' branch
+  wt remove                   # Interactive removal
+  wt list                     # List all worktrees
+
+For command-specific help:
+  wt new --help
+  wt remove --help
+  wt open --help
+  wt list --help
+
+Documentation: https://github.com/EtienneBBeaulac/git-worktrees
+HELP
+        return 0
+        ;;
+      # Not a subcommand - continue with existing logic
+      -*|--*)
+        # It's a flag, process normally below
+        ;;
+      *)
+        # Could be a branch name, process normally below
+        ;;
+    esac
+  fi
+
+  # ============================================================================
+  # Original Hub Logic (Interactive Mode / Branch Fast Path)
+  # ============================================================================
+  
   local start_mode="list" include_detached=0 enter_default="${WTHUB_ENTER_DEFAULT:-}"
   local branch_arg="" FZF_MISSING=
 
@@ -57,13 +344,30 @@ wt() {
       -h|--help)
         cat <<'USAGE'
 Usage: wt [options] [branch]
+       wt <subcommand> [args]
+
+Subcommands:
+  new, n       Create/open worktree (same as wtnew)
+  remove, rm   Remove worktree (same as wtrm)
+  open, o      Open worktree (same as wtopen)
+  list, ls     List worktrees (same as wtls)
+  prune        Remove stale references
+  config       Manage configuration (edit, show, init)
+  help         Show detailed help
+
+Hub Options:
   --start list|new        Start in list-first or branch-first mode (default: list)
   --detached              Include detached/headless worktrees in list
   --enter-default open|menu  Default Enter behavior (default: open)
-  -h, --help              Show help
-Notes:
-  - Enter opens the selected worktree; on "New branch…" runs creation.
-  - Keys: Ctrl-D remove, Ctrl-P prune stale, Ctrl-N new branch, A actions (TBD).
+  -v, --version           Show version
+  -h, --help              Show this help
+
+Examples:
+  wt                      Interactive hub
+  wt feature              Quick open/create 'feature' branch
+  wt new feature          Create worktree for 'feature'
+
+For detailed help: wt help
 USAGE
         return 0;;
       --*) echo "Unknown option: $1"; return 2;;
@@ -71,8 +375,21 @@ USAGE
     esac
   done
 
-  git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
-  command -v fzf >/dev/null || FZF_MISSING=1
+  if ! git rev-parse --git-dir &>/dev/null; then
+    if typeset -f wt_error_not_git_repo >/dev/null 2>&1; then
+      wt_error_not_git_repo
+    else
+      echo "❌ Not a git repository" >&2
+    fi
+    return 1
+  fi
+  
+  if ! command -v fzf >/dev/null; then
+    FZF_MISSING=1
+    if typeset -f wt_error_fzf_missing >/dev/null 2>&1; then
+      wt_error_fzf_missing
+    fi
+  fi
 
   # Fast path: wt <branch> auto-resolve
   if [[ -n $branch_arg ]]; then
@@ -126,6 +443,38 @@ USAGE
   porcelain="$(git worktree list --porcelain 2>/dev/null)"
   selectable="$(wt_parse_worktrees_porcelain ${include_detached} "$porcelain")"
 
+  # ============================================================================
+  # First-Run Experience (Phase 2 - v1.1.0)
+  # ============================================================================
+  # Check if this looks like a first run (only 1 worktree = main repo)
+  local worktree_count
+  worktree_count=$(printf "%s" "$selectable" | sed '/^$/d' | wc -l | tr -d ' ')
+  
+  if [[ "$worktree_count" -eq 1 ]]; then
+    cat <<'FIRSTRUN'
+
+📂 No additional worktrees found.
+
+💡 What are worktrees?
+   Git worktrees let you work on multiple branches simultaneously.
+   Each worktree is a separate directory with its own checked-out branch.
+
+   Instead of: git checkout feature → git checkout main → git checkout bugfix
+   You can have: ~/repo-feature/, ~/repo-main/, ~/repo-bugfix/
+   All at once! ✨
+
+🚀 Get started:
+   wt new <branch-name>    # Create your first worktree
+   wt new feature -b main  # Create from specific base branch
+   
+📖 Learn more:
+   wt --tutorial           # Interactive tutorial
+   wt help                 # Full documentation
+
+FIRSTRUN
+    return 0
+  fi
+
   # Prepend New branch row
   selectable="➕ New branch…"$'\t'$'(create)'$'\n'"$selectable"
   if (( ! include_detached )); then
@@ -178,6 +527,16 @@ USAGE
   local sel_branch sel_path tab
   tab=$'\t'
   sel_branch="${line%%${tab}*}"; sel_path="${line#*${tab}}"; sel_path="${sel_path%%${tab}*}"
+  
+  # Echo selection for context
+  if [[ "$sel_branch" == "➕ New branch…" ]]; then
+    echo "✓ Creating new worktree"
+  elif [[ "$sel_branch" == "🧵 Show detached…" ]]; then
+    echo "✓ Toggling detached worktrees"
+  else
+    echo "✓ Selected: $sel_branch"
+  fi
+  
   wt_debug "key=[$key] line=[$line] sel_branch=[$sel_branch] sel_path=[$sel_path]"
 
   # New branch row

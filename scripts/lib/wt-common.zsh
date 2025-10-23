@@ -6,7 +6,7 @@ unsetopt xtrace verbose
 typeset -g __WT_COMMON_SOURCED=1
 
 # Version (automatically updated by GitHub Actions on release)
-typeset -g WT_VERSION="1.0.4"
+typeset -g WT_VERSION="1.1.0"
 
 # ============================================================================
 # Load enhanced modules (Phase 1: Core Infrastructure)
@@ -120,7 +120,8 @@ wt_open_in_android_studio() {
     xdg-open "$dir" >/dev/null 2>&1 || true
     return 0
   fi
-  if command -v studio >/dev/null 2>&1; then
+  # Only use 'studio' command if app_name is actually Android Studio
+  if [[ "$app_name" == "Android Studio" ]] && command -v studio >/dev/null 2>&1; then
     studio "$dir" >/dev/null 2>&1 || true
   else
     if [[ -d "$dir/.idea" ]]; then
@@ -391,6 +392,60 @@ wt_warn()  { emulate -L zsh; setopt local_options pipefail; printf "%s\n" "WRN [
 wt_error() { emulate -L zsh; setopt local_options pipefail; printf "%s\n" "ERR [$0:t] $*" >&2; }
 
 # ============================================================================
+# Better Error Messages (Phase 2 - v1.1.0)
+# ============================================================================
+
+# Show error when not in a git repository
+wt_error_not_git_repo() {
+  cat >&2 <<'ERROR'
+❌ Not a git repository
+
+This command must be run from inside a git repository.
+
+Try:
+  cd /path/to/your/repo        # Navigate to your repository
+  git init                     # Initialize new repository
+  git clone <url>              # Clone existing repository
+
+What's a git repository?
+  A directory containing a .git folder that tracks your code history.
+
+ERROR
+}
+
+# Show error when fzf is missing but recommended
+wt_error_fzf_missing() {
+  cat >&2 <<'ERROR'
+⚠️  fzf not found
+
+For the best experience, install fzf (fuzzy finder):
+  brew install fzf            # macOS via Homebrew
+  apt install fzf             # Ubuntu/Debian
+  
+Continuing with basic selection...
+
+ERROR
+}
+
+# Show error when branch already exists
+wt_error_branch_exists() {
+  local branch="$1"
+  cat >&2 <<ERROR
+❌ Branch '$branch' already exists
+
+Did you mean:
+  wt open $branch              # Open existing worktree for this branch
+  wtopen $branch               # (same thing)
+  wt new ${branch}-v2          # Create with a different name
+
+Or use a different branch name:
+  wt new $branch-new
+  wt new $branch-$(date +%Y%m%d)
+
+ERROR
+}
+
+# ============================================================================
 # Smart Editor Detection (Phase 1 - v1.0.3)
 # ============================================================================
 
@@ -551,5 +606,116 @@ wt_load_editor_config() {
       export WT_EDITOR="$saved_editor"
     fi
   fi
+}
+
+# ============================================================================
+# Extended Config Support (Phase 2 - v1.1.0)
+# ============================================================================
+
+# Load full config file and set environment variables
+wt_load_full_config() {
+  emulate -L zsh
+  setopt local_options pipefail
+  
+  local config_file="${HOME}/.config/git-worktrees/config"
+  [[ ! -f "$config_file" ]] && return 0
+  
+  # Load behavior settings (don't override if already set)
+  if [[ -z ${WTNEW_AUTO_OPEN:-} ]]; then
+    local auto_open
+    auto_open="$(grep "^behavior.autoopen=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+    [[ "$auto_open" == "true" ]] && export WTNEW_AUTO_OPEN=1
+    [[ "$auto_open" == "false" ]] && export WTNEW_AUTO_OPEN=0
+  fi
+  
+  if [[ -z ${WTNEW_ALWAYS_PUSH:-} ]]; then
+    local auto_push
+    auto_push="$(grep "^behavior.autopush=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+    [[ "$auto_push" == "true" ]] && export WTNEW_ALWAYS_PUSH=1
+  fi
+  
+  if [[ -z ${WTNEW_PREFER_REUSE:-} ]]; then
+    local prefer_reuse
+    prefer_reuse="$(grep "^behavior.preferreuse=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+    [[ "$prefer_reuse" == "true" ]] && export WTNEW_PREFER_REUSE=1
+  fi
+  
+  # Load UI settings
+  if [[ -z ${WT_FZF_HEIGHT:-} ]]; then
+    local fzf_height
+    fzf_height="$(grep "^ui.fzfheight=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+    [[ -n "$fzf_height" ]] && export WT_FZF_HEIGHT="$fzf_height"
+  fi
+  
+  return 0
+}
+
+# Initialize config file with sensible defaults
+wt_init_config() {
+  emulate -L zsh
+  setopt local_options pipefail
+  
+  local config_dir="${HOME}/.config/git-worktrees"
+  local config_file="${config_dir}/config"
+  
+  # Don't overwrite existing config
+  [[ -f "$config_file" ]] && return 0
+  
+  mkdir -p "$config_dir"
+  
+  local detected_editor
+  detected_editor="$(wt_detect_editor 2>/dev/null)" || detected_editor=""
+  
+  cat > "$config_file" <<EOF
+# git-worktrees configuration
+# Edit this file to customize behavior
+# Or use environment variables to override (higher priority)
+
+# ============================================================================
+# Editor Settings
+# ============================================================================
+# Which editor/IDE to open worktrees in
+# Environment variable override: WT_EDITOR or WT_APP
+editor=${detected_editor:-}
+
+# ============================================================================
+# Behavior Settings
+# ============================================================================
+# Automatically open editor after creating worktree
+# Environment variable override: WTNEW_AUTO_OPEN
+behavior.autoopen=true
+
+# Always push new branches to remote by default
+# Environment variable override: WTNEW_ALWAYS_PUSH
+behavior.autopush=false
+
+# Prefer reusing existing worktree directories
+# Environment variable override: WTNEW_PREFER_REUSE
+behavior.preferreuse=false
+
+# ============================================================================
+# UI Settings
+# ============================================================================
+# FZF height (e.g. 40%, 20, etc.)
+# Environment variable override: WT_FZF_HEIGHT
+ui.fzfheight=40%
+
+# Show keyboard shortcuts in FZF header
+ui.showshortcuts=true
+
+# ============================================================================
+# Priority Order
+# ============================================================================
+# 1. Command-line flags (highest priority)
+# 2. Environment variables
+# 3. This config file (lowest priority)
+#
+# Example:
+#   export WT_EDITOR="VS Code"    # Overrides config file
+#   wtnew --app="IntelliJ IDEA"   # Overrides everything
+EOF
+  
+  echo "✅ Created config file: $config_file" >&2
+  return 0
 }
 

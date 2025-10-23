@@ -37,31 +37,22 @@ $ cd ~/code/repo-feature/      # Back to work
 
 ## Commands
 
-- `wt`     – Interactive hub to list, open, create, and manage worktrees (fuzzy find with fzf)
-- `wtnew`  – Create/open a worktree for a new or existing branch (smart detection)
-- `wtrm`   – Safely remove a worktree (guards against uncommitted/unpushed work)
-- `wtopen` – Open an existing worktree for a branch (fuzzy picker, no mutations)
-- `wtls`   – List worktrees with status (clean/dirty, ahead/behind)
+**Interactive hub:**
+- `wt` – Interactive fuzzy finder to list, switch, create, and manage worktrees
+
+**Subcommands:**
+- `wt new` / `wt n` – Create/open a worktree for a new or existing branch
+- `wt remove` / `wt rm` – Safely remove a worktree (guards against uncommitted/unpushed work)
+- `wt open` / `wt o` – Open an existing worktree for a branch
+- `wt list` / `wt ls` – List worktrees with status (clean/dirty, ahead/behind)
+- `wt prune` – Remove stale worktree references
+- `wt config` – Manage configuration (edit, show, init)
+- `wt help` – Show detailed help
+
+**Quick access (shorthand):**
+- `wtnew`, `wtrm`, `wtopen`, `wtls` – Direct commands (same as subcommands, just faster to type)
 
 ## Install
-
-### Via Install Script
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/install.sh | bash
-```
-
-After install, restart your shell or run:
-
-```bash
-source ~/.zshrc
-```
-
-For local/offline testing, you can override downloads with a local repo path:
-
-```bash
-REPO_RAW="file://$PWD" bash install.sh
-```
 
 ### Via Homebrew (Recommended)
 
@@ -70,7 +61,7 @@ brew tap etiennebbeaulac/tap
 brew install git-worktrees
 ```
 
-**That's it!** Commands are automatically available in your PATH. No configuration needed. ✨
+**That's it!** Commands are immediately available. No configuration needed. ✨
 
 ```bash
 wt --help  # Try it now!
@@ -81,35 +72,59 @@ wt --help  # Try it now!
 brew upgrade git-worktrees
 ```
 
+### Via Install Script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main/install.sh | bash
+```
+
+Then restart your shell or run: `source ~/.zshrc`
+
+For local/offline testing, you can override downloads with a local repo path:
+
+```bash
+REPO_RAW="file://$PWD" bash install.sh
+```
+
 ## Quick Start
 
 ```bash
-# Create your first worktree
-wtnew feature-branch
+# Interactive hub - the main way to use git-worktrees
+wt                       # Fuzzy-find worktrees, switch, create, manage
 
-# List and switch between worktrees (interactive)
-wt
+# Or use direct commands when you know what you want
+wt new feature-branch    # Create your first worktree
+wt open feature-branch   # Open specific worktree
+wt remove                # Remove a worktree safely
+wt list                  # List all worktrees with status
 
-# Open specific worktree
-wtopen feature-branch
-
-# Remove a worktree safely
-wtrm
+# Shorthand versions (same thing, less typing)
+wtnew feature-branch     # Same as: wt new feature-branch
+wtopen feature-branch    # Same as: wt open feature-branch
 ```
 
 ## Usage Examples
 
 ```bash
-wt                          # Interactive hub (fuzzy find with fzf)
-wt feature-x                # Quick open/create for branch
-wtnew feature-x             # Create worktree for new or existing branch
-wtnew -n feature/x -b origin/main --no-open  # Advanced creation
-wtopen feature/x            # Open existing worktree
-wtls                        # List all worktrees with status
-wtls --fzf --open           # List and open selected in your editor
-wtrm                        # Interactive removal (includes "Remove all detached")
-wtrm -d ../repo-feature-x --delete-branch    # Remove and delete branch
-wtrm --rm-detached --yes    # Bulk remove all detached worktrees
+# Interactive hub - main interface
+wt                           # Fuzzy-find and switch between worktrees
+wt feature-x                 # Quick open/create for specific branch
+
+# Subcommands - when you know what you want
+wt new feature-x             # Create worktree for new or existing branch
+wt new feature/x -b main     # Create from 'main' branch
+wt open feature/x            # Open existing worktree
+wt list                      # List all worktrees with status
+wt list --fzf --open         # List and open selected in your editor
+wt remove                    # Interactive removal (includes "Remove all detached")
+wt remove -d ../repo-feature-x --delete-branch  # Remove and delete branch
+wt prune                     # Remove stale worktree references
+wt config edit               # Customize configuration
+
+# Shorthand - same commands, less typing
+wtnew feature-x              # Same as: wt new feature-x
+wtrm                         # Same as: wt remove
+wtrm --rm-detached --yes     # Bulk remove all detached worktrees
 ```
 
 ## Requirements
@@ -129,13 +144,20 @@ wtrm --rm-detached --yes    # Bulk remove all detached worktrees
 - `--prefer-reuse` Prefer reusing an existing clean worktree slot over creating new
 - `--inside-ok` Allow creating a path inside the current repo (unsafe)
 
-Env:
-- `WT_APP` or `WT_EDITOR` Override auto-detected editor (e.g. "VS Code", "IntelliJ IDEA")
-- `EDITOR` / `VISUAL` Standard editor environment variables (respected)
-- `WT_FZF_OPTS`, `WT_FZF_HEIGHT` Customize fzf appearance
-- `WTNEW_ALWAYS_PUSH=1` Always push new branches by default
-- `WTNEW_PREFER_REUSE=1` Prefer reusing clean slots by default
-- `WT_DEBUG=1` Print debug info
+Environment variables:
+- `WT_EDITOR` or `WT_APP` – Override auto-detected editor (e.g. "VS Code", "IntelliJ IDEA")
+- `EDITOR` / `VISUAL` – Standard editor environment variables (respected)
+- `WT_FZF_OPTS`, `WT_FZF_HEIGHT` – Customize fzf appearance
+- `WTNEW_ALWAYS_PUSH=1` – Always push new branches by default
+- `WTNEW_PREFER_REUSE=1` – Prefer reusing clean slots by default
+- `WTNEW_AUTO_OPEN=0` – Disable auto-opening editor
+- `WT_DEBUG=1` – Print debug info
+
+Configuration file (`~/.config/git-worktrees/config`):
+- Auto-created with detected editor on first run
+- Customize behavior, editor, and UI settings
+- Manage with: `wt config edit`
+- Lower priority than env vars (env vars override config)
 
 ## wtopen options
 
@@ -155,6 +177,16 @@ Env:
 
 ## wt (hub) keys and options
 
+**Subcommands:**
+- `wt new <branch>` – Create/open worktree
+- `wt remove` – Remove worktree
+- `wt open <branch>` – Open existing worktree
+- `wt list` – List all worktrees
+- `wt config` – Manage configuration (edit, show, init)
+- `wt --tutorial` – Interactive tutorial for beginners
+- `wt help` – Full documentation
+
+**Interactive hub:**
 - Start: list of worktrees with "➕ New branch…" and optional "🧵 Show detached…"
 - Keys:
   - Enter: open (or actions when toggled); Ctrl-E toggles Enter between open/menu (persisted)
@@ -163,6 +195,12 @@ Env:
 - Actions menu (Ctrl-A): Includes "Remove all detached" option for bulk removal
 - Flags: `--start list|new`, `--detached`, `--enter-default open|menu`
 - Env: `WTHUB_ENTER_DEFAULT=open|menu`, `WT_TERMINAL_APP` for "Open in terminal"
+
+**Configuration:**
+- Config file: `~/.config/git-worktrees/config`
+- Auto-created on first run with smart defaults
+- Edit with: `wt config edit` or manually
+- Priority: flags > env vars > config file
 
 ## Testing
 

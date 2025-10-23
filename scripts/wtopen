@@ -66,8 +66,18 @@ USAGE
   done
 
   # -------- sanity checks --------
-  git rev-parse --git-dir &>/dev/null || { echo "❌ Not a git repo"; return 1; }
-  command -v fzf >/dev/null || FZF_MISSING=1
+  if ! git rev-parse --git-dir &>/dev/null; then
+    if typeset -f wt_error_not_git_repo >/dev/null 2>&1; then
+      wt_error_not_git_repo
+    else
+      echo "❌ Not a git repository" >&2
+    fi
+    return 1
+  fi
+  
+  if ! command -v fzf >/dev/null; then
+    FZF_MISSING=1
+  fi
 
   # Option: prune stale
   if (( prune_stale )); then
@@ -227,11 +237,14 @@ USAGE
       return 0
     fi
     
+    # Show selection context
+    echo "✓ Opening worktree: $(basename "$target_dir")"
     echo "🚀  Opening in ${open_app}…"
     if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
       wt_open_in_android_studio "$target_dir" "$open_app"
     else
-      if command -v studio >/dev/null 2>&1; then
+      # Only use 'studio' command if app is actually Android Studio
+      if [[ "$open_app" == "Android Studio" ]] && command -v studio >/dev/null 2>&1; then
         studio "$target_dir" >/dev/null 2>&1 || true
       else
         if [[ -d "$target_dir/.idea" ]]; then
