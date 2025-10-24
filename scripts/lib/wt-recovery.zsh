@@ -12,41 +12,61 @@ unsetopt xtrace verbose
 
 # Generic retry wrapper with exponential backoff
 # Usage: wt_retry <max_attempts> <command> [args...]
+# Returns: 0 on success, 1 on failure
+# Sets: WT_LAST_ERROR (stderr output from last failed attempt)
 wt_retry() {
   local max_attempts="$1"; shift
   local attempt=1
   local backoff=1
-  
+  typeset -g WT_LAST_ERROR=""
+
   while (( attempt <= max_attempts )); do
-    if "$@" 2>/dev/null; then
+    local stderr_output
+    stderr_output=$(mktemp)
+
+    if "$@" 2>"$stderr_output"; then
+      rm -f "$stderr_output"
       return 0
     fi
-    
+
+    WT_LAST_ERROR=$(cat "$stderr_output" 2>/dev/null)
+    rm -f "$stderr_output"
+
     if (( attempt < max_attempts )); then
       echo "⚠️  Attempt $attempt failed, retrying in ${backoff}s..." >&2
       sleep "$backoff"
       backoff=$((backoff * 2))
     fi
-    
+
     ((attempt++))
   done
-  
+
   echo "❌ Failed after $max_attempts attempts" >&2
   return 1
 }
 
 # Retry with custom prompt for user intervention
 # Usage: wt_retry_with_prompt <max_attempts> <prompt_fn> <command> [args...]
+# Returns: 0 on success, 1 on failure
+# Sets: WT_LAST_ERROR (stderr output from last failed attempt)
 wt_retry_with_prompt() {
   local max_attempts="$1"; shift
   local prompt_fn="$1"; shift
   local attempt=1
-  
+  typeset -g WT_LAST_ERROR=""
+
   while (( attempt <= max_attempts )); do
-    if "$@" 2>/dev/null; then
+    local stderr_output
+    stderr_output=$(mktemp)
+
+    if "$@" 2>"$stderr_output"; then
+      rm -f "$stderr_output"
       return 0
     fi
-    
+
+    WT_LAST_ERROR=$(cat "$stderr_output" 2>/dev/null)
+    rm -f "$stderr_output"
+
     if (( attempt < max_attempts )); then
       # Call custom prompt function
       if ! "$prompt_fn" "$attempt" "$max_attempts"; then
@@ -54,10 +74,46 @@ wt_retry_with_prompt() {
         return 1
       fi
     fi
-    
+
     ((attempt++))
   done
-  
+
+  return 1
+}
+
+# Git fetch with retry and exponential backoff
+# Usage: wt_git_fetch_with_retry [git fetch args...]
+# Returns: 0 on success, 1 on failure
+# Sets: WT_LAST_ERROR (stderr output from last failed attempt)
+# Retries: 4 times with backoff (2s, 4s, 8s, 16s)
+wt_git_fetch_with_retry() {
+  local max_attempts=4
+  local attempt=1
+  local backoff=2  # Start at 2 seconds
+  typeset -g WT_LAST_ERROR=""
+
+  while (( attempt <= max_attempts )); do
+    local stderr_output
+    stderr_output=$(mktemp)
+
+    if git fetch "$@" 2>"$stderr_output"; then
+      rm -f "$stderr_output"
+      return 0
+    fi
+
+    WT_LAST_ERROR=$(cat "$stderr_output" 2>/dev/null)
+    rm -f "$stderr_output"
+
+    if (( attempt < max_attempts )); then
+      echo "⚠️  Fetch attempt $attempt failed, retrying in ${backoff}s..." >&2
+      sleep "$backoff"
+      backoff=$((backoff * 2))  # Double for next retry: 2s, 4s, 8s, 16s
+    fi
+
+    ((attempt++))
+  done
+
+  echo "❌ Git fetch failed after $max_attempts attempts" >&2
   return 1
 }
 
@@ -75,7 +131,14 @@ wt_diagnose_error() {
   # Network errors
   if [[ "$output" == *"Could not resolve host"* ]] || \
      [[ "$output" == *"Network is unreachable"* ]] || \
-     [[ "$output" == *"Connection refused"* ]]; then
+     [[ "$output" == *"Connection refused"* ]] || \
+     [[ "$output" == *"Connection timed out"* ]] || \
+     [[ "$output" == *"timed out"* ]] || \
+     [[ "$output" == *"Failed to connect"* ]] || \
+     [[ "$output" == *"unable to access"* ]] || \
+     [[ "$output" == *"SSL"*"error"* ]] || \
+     [[ "$output" == *"certificate"*"problem"* ]] || \
+     [[ "$output" == *"Connection reset by peer"* ]]; then
     echo "network_failure"
     return 0
   fi
@@ -464,7 +527,7 @@ wt_max_retries() {
 
 # Export functions for use (silently)
 {
-  typeset -gf wt_retry wt_retry_with_prompt
+  typeset -gf wt_retry wt_retry_with_prompt wt_git_fetch_with_retry
   typeset -gf wt_diagnose_error wt_error_message wt_offer_recovery
   typeset -gf wt_save_session wt_restore_session wt_session_is_recent
   typeset -gf wt_clear_session wt_offer_resume

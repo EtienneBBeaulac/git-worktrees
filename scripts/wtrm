@@ -97,12 +97,20 @@ USAGE
 
   # Keep remotes up-to-date (optional, consistent with wtnew)
   echo "🔄  Fetching remotes…"
-  if ! git fetch --all --prune --tags --quiet 2>/dev/null; then
-    # Network failure - continue with cached refs
-    if typeset -f wt_diagnose_error >/dev/null 2>&1; then
+  if typeset -f wt_git_fetch_with_retry >/dev/null 2>&1; then
+    # Use retry wrapper with proper error capture
+    if ! wt_git_fetch_with_retry --all --prune --tags --quiet; then
+      # Diagnose the error from captured stderr
+      if [[ -n "${WT_LAST_ERROR:-}" ]]; then
+        local error_type=$(wt_diagnose_error "git fetch" "$WT_LAST_ERROR" 1)
+        echo "⚠️  $(wt_error_message "$error_type")" >&2
+      fi
+      echo "   Continuing with cached refs..."
+    fi
+  else
+    # Fallback if recovery module not loaded
+    if ! git fetch --all --prune --tags --quiet 2>/dev/null; then
       echo "⚠️  Fetch failed, continuing with cached refs..."
-    else
-      true  # Continue silently
     fi
   fi
 
