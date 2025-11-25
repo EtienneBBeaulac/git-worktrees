@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2025-01-25
+
+### Fixed
+
+#### Transaction & Trap Handling
+- **Fixed transaction trap not cleared on early returns** in `wtnew` - prevents spurious rollbacks
+- **Fixed early return bypassing transaction cleanup** when editor is set to "none"
+- All early validation returns now properly clean up traps via `_wtnew_early_return()`
+
+#### Path & Directory Issues
+- **Fixed `.gitmodules` check** now correctly uses repository root instead of current directory
+- **Fixed config path handling** - uses pure functions instead of mutable globals
+
+#### User Experience
+- **Fixed first-run experience** triggering repeatedly - now shows only once
+- **Fixed misleading FZF error message** in `wtopen` when FZF is not installed
+- **Fixed non-FZF base ref prompt** now includes cancel option ('q')
+- **Fixed `git worktree remove` errors** now displayed instead of suppressed
+
+#### Editor Integration
+- **Fixed `.idea` directory targeting** - now JetBrains-specific only (was incorrectly used for all editors)
+- **Fixed duplicated editor-opening logic** in `wtls` - now uses centralized `wt_open_in_editor()`
+
+#### Configuration
+- **Fixed config values with special characters** breaking sed - now uses robust awk implementation
+- **Fixed dirty state verification** in `wtrm` - re-verifies after commit/stash operations
+
+#### Recovery System
+- **Fixed fragile JSON parsing** in session restore - replaced regex with robust awk script
+
+### Changed
+
+#### Architecture Improvements
+- Added centralized message helpers: `wt_msg_error()`, `wt_msg_warn()`, `wt_msg_success()`, `wt_msg_info()`
+- Added `wt_git_worktree_list_porcelain()` wrapper for consistent porcelain parsing
+- Added `wt_has_fzf()` for centralized FZF detection
+- Added `wt_find_default_branch()` pure function for default branch detection
+- Added `wt_is_worktree_dirty()` and `wt_get_worktree_status()` helpers
+- Added `wt_config_dir()` and `wt_config_file()` pure functions (eliminates mutable global state)
+- Merged `wt_validate_branch_name` functions into single pure implementation
+- Replaced regex with glob patterns in validation for better zsh compatibility
+- Removed `typeset -f` checks in favor of stub functions for optional modules
+
+---
+
 ## [1.1.1] - 2025-01-XX
 
 ### Added
