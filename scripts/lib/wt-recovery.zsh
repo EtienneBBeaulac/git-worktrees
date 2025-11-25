@@ -264,16 +264,24 @@ wt_offer_recovery() {
 # Session State Management
 # ============================================================================
 
-# Session state directory
-typeset -g WT_SESSION_DIR="${HOME}/.cache/git-worktrees/sessions"
+# Session state directory - computed on demand via function
+wt_session_dir() {
+  local cache_dir
+  if typeset -f wt_cache_dir >/dev/null 2>&1; then
+    cache_dir="$(wt_cache_dir)"
+  else
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/git-worktrees"
+  fi
+  printf "%s/sessions" "$cache_dir"
+}
 
 # Save session state for recovery
 # Usage: wt_save_session <tool_name> <key=value> [key=value...]
 wt_save_session() {
   local tool="$1"; shift
-  local session_file="$WT_SESSION_DIR/${tool}_last.json"
+  local session_file="$(wt_session_dir)/${tool}_last.json"
   
-  mkdir -p "$WT_SESSION_DIR" 2>/dev/null || return 1
+  mkdir -p "$(wt_session_dir)" 2>/dev/null || return 1
   
   local timestamp="$(date +%s)"
   local pwd_escaped="$(pwd | sed 's/"/\\"/g')"
@@ -310,21 +318,42 @@ wt_save_session() {
 # Outputs: key=value pairs to stdout
 wt_restore_session() {
   local tool="$1"
-  local session_file="$WT_SESSION_DIR/${tool}_last.json"
+  local session_file="$(wt_session_dir)/${tool}_last.json"
   
   [[ -f "$session_file" ]] || return 1
   
-  # Simple JSON parsing without jq
-  grep -o '"[^"]*": "[^"]*"' "$session_file" | \
-    sed 's/": "/=/; s/"//g' | \
-    grep -v "tool=\|timestamp=\|pwd="
+  # More robust JSON parsing without jq
+  # Only parse lines within the "state" object, handle escaped quotes and special chars
+  awk '
+    # Track if we are inside the "state" block
+    /"state"[[:space:]]*:[[:space:]]*\{/ { in_state=1; next }
+    in_state && /\}/ { in_state=0; next }
+    in_state {
+      # Match "key": "value" patterns, handle escaped quotes in values
+      if (match($0, /"([^"]+)"[[:space:]]*:[[:space:]]*"([^"\\]*(\\.[^"\\]*)*)"/, arr)) {
+        key = arr[1]
+        val = arr[2]
+        # Skip metadata keys
+        if (key != "tool" && key != "timestamp" && key != "pwd") {
+          # Unescape escaped quotes
+          gsub(/\\"/, "\"", val)
+          print key "=" val
+        }
+      }
+    }
+  ' "$session_file" 2>/dev/null || {
+    # Fallback to simple parsing if awk fails (older awk versions)
+    grep -o '"[^"]*": "[^"]*"' "$session_file" 2>/dev/null | \
+      sed 's/": "/=/; s/"//g' | \
+      grep -v "tool=\|timestamp=\|pwd=" || true
+  }
 }
 
 # Check if session is recent (within 1 hour)
 # Usage: wt_session_is_recent <tool_name>
 wt_session_is_recent() {
   local tool="$1"
-  local session_file="$WT_SESSION_DIR/${tool}_last.json"
+  local session_file="$(wt_session_dir)/${tool}_last.json"
   
   [[ -f "$session_file" ]] || return 1
   
@@ -339,7 +368,7 @@ wt_session_is_recent() {
 # Usage: wt_clear_session <tool_name>
 wt_clear_session() {
   local tool="$1"
-  local session_file="$WT_SESSION_DIR/${tool}_last.json"
+  local session_file="$(wt_session_dir)/${tool}_last.json"
   
   rm -f "$session_file" 2>/dev/null || true
 }
@@ -352,7 +381,7 @@ wt_offer_resume() {
   
   wt_session_is_recent "$tool" || return 1
   
-  local session_file="$WT_SESSION_DIR/${tool}_last.json"
+  local session_file="$(wt_session_dir)/${tool}_last.json"
   local timestamp="$(grep '"timestamp":' "$session_file" | grep -o '[0-9]*')"
   local time_str="$(date -r "$timestamp" "+%H:%M:%S" 2>/dev/null || echo "recently")"
   
@@ -375,13 +404,22 @@ wt_offer_resume() {
 # Transaction Log (for rollback)
 # ============================================================================
 
-typeset -g WT_TRANSACTION_LOG="${HOME}/.cache/git-worktrees/transaction.log"
+# Transaction log path - computed on demand via function
+wt_transaction_log() {
+  local cache_dir
+  if typeset -f wt_cache_dir >/dev/null 2>&1; then
+    cache_dir="$(wt_cache_dir)"
+  else
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/git-worktrees"
+  fi
+  printf "%s/transaction.log" "$cache_dir"
+}
 typeset -g WT_TRANSACTION_ACTIVE=0
 
 # Begin transaction
 wt_transaction_begin() {
-  mkdir -p "$(dirname "$WT_TRANSACTION_LOG")" 2>/dev/null
-  echo "# Transaction started at $(date)" > "$WT_TRANSACTION_LOG"
+  mkdir -p "$(dirname "$(wt_transaction_log)")" 2>/dev/null
+  echo "# Transaction started at $(date)" > "$(wt_transaction_log)"
   WT_TRANSACTION_ACTIVE=1
 }
 
@@ -393,12 +431,12 @@ wt_transaction_record() {
   local action="$1"; shift
   local details="$*"
   
-  echo "$action|$details" >> "$WT_TRANSACTION_LOG"
+  echo "$action|$details" >> "$(wt_transaction_log)"
 }
 
 # Commit transaction (clear log)
 wt_transaction_commit() {
-  rm -f "$WT_TRANSACTION_LOG" 2>/dev/null || true
+  rm -f "$(wt_transaction_log)" 2>/dev/null || true
   WT_TRANSACTION_ACTIVE=0
 }
 
@@ -419,7 +457,7 @@ _wt_tac() {
 wt_transaction_rollback() {
   (( WT_TRANSACTION_ACTIVE )) || return 0
   
-  [[ -f "$WT_TRANSACTION_LOG" ]] || return 0
+  [[ -f "$(wt_transaction_log)" ]] || return 0
   
   echo "↩️  Rolling back changes..."
   
@@ -453,7 +491,7 @@ wt_transaction_rollback() {
         git -C "$repo" config --unset "$key" 2>/dev/null || true
         ;;
     esac
-  done < <(_wt_tac "$WT_TRANSACTION_LOG")
+  done < <(_wt_tac "$(wt_transaction_log)")
   
   wt_transaction_commit
   echo "✅ Rollback complete"

@@ -21,8 +21,10 @@ TEST_HOME="$(mktemp -d)"
 export HOME="$TEST_HOME"
 trap 'rm -rf "$TEST_HOME"; export HOME="$ORIG_HOME"' EXIT
 
-CONFIG_DIR="$HOME/.config/git-worktrees"
-CONFIG_FILE="$CONFIG_DIR/config"
+# Pure functions wt_config_dir() and wt_config_file() automatically
+# use the current HOME value, so no need to update constants
+CONFIG_DIR="$(wt_config_dir)"
+CONFIG_FILE="$(wt_config_file)"
 
 # ============================================================================
 # wt_load_config tests

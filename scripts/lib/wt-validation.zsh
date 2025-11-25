@@ -7,66 +7,61 @@ setopt local_options pipefail
 unsetopt xtrace verbose
 
 # ============================================================================
-# Branch Name Validation
+# Branch Name Validation (Pure Functions - No Mutable Global State)
 # ============================================================================
 
-# Validate branch name according to Git rules
-# Usage: wt_validate_branch_name <name>
-# Returns: 0 if valid, 1 if invalid
-wt_validate_branch_name() {
+# Get validation error for a branch name (pure function)
+# Usage: error=$(wt_branch_validation_error "name")
+# Returns: Error message on stdout if invalid, empty if valid
+# Exit code: 0 always (use output to check validity)
+wt_branch_validation_error() {
   local name="$1"
   
-  # Empty name
-  [[ -z "$name" ]] && return 1
+  [[ -z "$name" ]] && { echo "Branch name cannot be empty"; return 0; }
+  [[ "$name" == .* ]] && { echo "Branch name cannot start with '.'"; return 0; }
+  [[ "$name" == -* ]] && { echo "Branch name cannot start with '-'"; return 0; }
+  [[ "$name" == *..* ]] && { echo "Branch name cannot contain '..'"; return 0; }
+  [[ "$name" == *'@{'* ]] && { echo "Branch name cannot contain '@{'"; return 0; }
+  [[ "$name" == *' '* ]] && { echo "Branch name cannot contain spaces"; return 0; }
   
-  # Cannot start with .
-  [[ "$name" == .* ]] && return 1
+  # Special chars check (glob pattern for zsh compatibility)
+  if [[ "$name" == *'~'* || "$name" == *'^'* || "$name" == *':'* || 
+        "$name" == *'?'* || "$name" == *'*'* || "$name" == *'['* ||
+        "$name" == *'\'* || "$name" == *']'* ]]; then
+    echo "Branch name contains invalid characters: ~^:?*[\\"
+    return 0
+  fi
   
-  # Cannot start with -
-  [[ "$name" == -* ]] && return 1
+  [[ "$name" == *.lock ]] && { echo "Branch name cannot end with '.lock'"; return 0; }
+  [[ "$name" == */ ]] && { echo "Branch name cannot end with '/'"; return 0; }
+  [[ "$name" == "@" ]] && { echo "Branch name cannot be '@'"; return 0; }
   
-  # Cannot contain ..
-  [[ "$name" == *..* ]] && return 1
-  
-  # Cannot contain @{
-  [[ "$name" == *'@{'* ]] && return 1
-  
-  # Cannot contain space
-  [[ "$name" == *' '* ]] && return 1
-  
-  # Cannot contain special chars: ~^:?*[\
-  [[ "$name" =~ [~^:?*\[\\\]] ]] && return 1
-  
-  # Cannot end with .lock
-  [[ "$name" == *.lock ]] && return 1
-  
-  # Cannot end with /
-  [[ "$name" == */ ]] && return 1
-  
-  # Cannot be @
-  [[ "$name" == "@" ]] && return 1
-  
-  # Valid
+  # Valid - no output
   return 0
 }
 
-# Get branch name validation error message
-# Usage: wt_validate_branch_name_error <name>
-wt_validate_branch_name_error() {
+# Validate branch name according to Git rules (uses pure function internally)
+# Usage: wt_validate_branch_name <name>
+# Returns: 0 if valid, 1 if invalid (error message sent to stderr)
+wt_validate_branch_name() {
   local name="$1"
+  local error
+  error="$(wt_branch_validation_error "$name")"
   
-  [[ -z "$name" ]] && echo "Branch name cannot be empty" && return
-  [[ "$name" == .* ]] && echo "Branch name cannot start with '.'" && return
-  [[ "$name" == -* ]] && echo "Branch name cannot start with '-'" && return
-  [[ "$name" == *..* ]] && echo "Branch name cannot contain '..'" && return
-  [[ "$name" == *'@{'* ]] && echo "Branch name cannot contain '@{'" && return
-  [[ "$name" == *' '* ]] && echo "Branch name cannot contain spaces" && return
-  [[ "$name" =~ [~^:?*\[\\\]] ]] && echo "Branch name contains invalid characters: ~^:?*[\\" && return
-  [[ "$name" == *.lock ]] && echo "Branch name cannot end with '.lock'" && return
-  [[ "$name" == */ ]] && echo "Branch name cannot end with '/'" && return
-  [[ "$name" == "@" ]] && echo "Branch name cannot be '@'" && return
-  
-  echo "Branch name is invalid"
+  if [[ -n "$error" ]]; then
+    # Output error to stderr so caller can capture it or let it display
+    echo "$error" >&2
+    return 1
+  fi
+  return 0
+}
+
+# Get branch name validation error message (legacy compatibility)
+# Usage: msg=$(wt_validate_branch_name_error <name>)
+wt_validate_branch_name_error() {
+  local error
+  error="$(wt_branch_validation_error "$1")"
+  echo "${error:-Branch name is invalid}"
 }
 
 # ============================================================================
@@ -300,6 +295,7 @@ wt_remote_branch_exists() {
 # Usage: wt_worktree_exists <path>
 wt_worktree_exists() {
   local path="$1"
+  # Issue #2 fix - use wrapper function (note: wt_git_worktree_list_porcelain may not be loaded yet)
   git worktree list --porcelain 2>/dev/null | grep -q "^worktree $(cd "$path" 2>/dev/null && pwd)$"
 }
 
@@ -307,6 +303,7 @@ wt_worktree_exists() {
 # Usage: wt_branch_checked_out <branch>
 wt_branch_checked_out() {
   local branch="$1"
+  # Issue #2 fix - keep direct call since wt-common.zsh may not be loaded yet
   git worktree list --porcelain 2>/dev/null | grep -q "^branch refs/heads/$branch$"
 }
 

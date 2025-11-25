@@ -57,11 +57,8 @@ USAGE
   done
 
   if ! wt_git_is_repo; then
-    if typeset -f wt_error_not_git_repo >/dev/null 2>&1; then
-      wt_error_not_git_repo
-    else
-      wt_msg_error "Not a git repository"
-    fi
+    # Issue #4 fix - wt_error_not_git_repo always available
+    wt_error_not_git_repo
     return 1
   fi
 
@@ -71,11 +68,13 @@ USAGE
     return 0
   fi
 
-  command -v fzf >/dev/null || FZF_MISSING=1
+  # Use centralized FZF detection (Issue #3 fix)
+  wt_has_fzf || FZF_MISSING=1
 
   # Parse worktrees via shared helper: path|branch|head
   local porcelain wt_table
-  porcelain="$(git worktree list --porcelain 2>/dev/null)"
+  # Issue #2 fix - use wrapper function
+  porcelain="$(wt_git_worktree_list_porcelain)"
   wt_table="$(wt_parse_worktrees_table "$porcelain")"
 
   [[ -z "$wt_table" ]] && { echo "ℹ️  No worktrees found."; return 0; }
@@ -89,12 +88,9 @@ USAGE
     local rest="${row#*|}"
     local br_full="${rest%%|*}"
     local head="${rest##*|}"
+    # Issue #4 fix - wt_short_ref always available
     local shortbr
-    if typeset -f wt_short_ref >/dev/null 2>&1; then
-      shortbr="$(wt_short_ref "$br_full")"
-    else
-      shortbr="$br_full"
-    fi
+    shortbr="$(wt_short_ref "$br_full")"
     [[ -z "$shortbr" ]] && shortbr="(detached)@${head:0:7}"
 
     # Determine status (clean/dirty) and optionally ahead/behind
@@ -111,13 +107,8 @@ USAGE
       if [[ -n "$upstream" ]]; then
         compare_ref="$upstream"
       else
-        # Fallbacks when no upstream: origin/main → origin/master → main → master
-        local ref
-        for ref in origin/main origin/master main master; do
-          if git -C "$dir" rev-parse --verify -q "$ref" >/dev/null; then
-            compare_ref="$ref"; break
-          fi
-        done
+        # Use centralized default branch detection (Issue #6 fix)
+        compare_ref="$(wt_find_default_branch "$dir")" || true
       fi
       if [[ -n "$compare_ref" ]]; then
         local lr; lr="$(git -C "$dir" rev-list --left-right --count "${compare_ref}...HEAD" 2>/dev/null || echo "0 0")"
@@ -138,7 +129,7 @@ USAGE
             --prompt="📋 Worktrees: " \
             --with-nth=1,2 --delimiter='\t' \
             --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then cd "$d" && git status -sb --untracked-files=all; echo; git log --oneline -n 20 --decorate --graph --color=always; fi' \
-            --preview-window=right,60%)" || { echo "❌ No selection"; return 1; }
+            --preview-window=right,60%)" || { wt_msg_error "No selection"; return 1; }
     local sel_branch sel_dir line
     line="$(printf "%s\n" "$out" | tail -n 1)"
     sel_branch="$(printf "%s\n" "$line" | awk -F"\t" '{print $1}')"
@@ -154,6 +145,8 @@ USAGE
       else
         echo "🚀  Opening in ${open_app}…"
       fi
+      
+      # Debug logging for tests
       [[ -n ${TEST_TMP:-} ]] && {
         {
           echo "sel_dir=$sel_dir"; echo "open_app=$open_app";
@@ -163,15 +156,9 @@ USAGE
       }
       # Test hook: record selection path for verification
       [[ -n ${TEST_TMP:-} ]] && { printf "%s\n" "$sel_dir" >> "${TEST_TMP}/open_calls.txt" 2>/dev/null || true; }
-      if [[ -n ${WT_PREFER_XDG_OPEN:-} ]] && command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$sel_dir" >/dev/null 2>&1 || true
-      elif command -v open >/dev/null 2>&1; then
-        open -a "$open_app" "$sel_dir" >/dev/null 2>&1 || true
-      elif typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
-        wt_open_in_android_studio "$sel_dir" "$open_app"
-      elif command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$sel_dir" >/dev/null 2>&1 || true
-      fi
+      
+      # Use centralized editor opening logic
+      wt_open_in_editor "$sel_dir" "$open_app"
       echo "📂  If no window appears, open it manually via File → Open… → $sel_dir"
     else
       echo "$sel_dir"

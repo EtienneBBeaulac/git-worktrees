@@ -181,20 +181,15 @@ TUTORIAL
         local action="${1:-show}"
         case "$action" in
           init)
-            if typeset -f wt_init_config >/dev/null 2>&1; then
-              wt_init_config
-            else
-              echo "❌ Config initialization not available"
-              return 1
-            fi
+            # Issue #4 fix - wt_init_config is always available
+            wt_init_config
             ;;
           edit)
             local config_file="${HOME}/.config/git-worktrees/config"
             if [[ ! -f "$config_file" ]]; then
               echo "⚠️  Config file doesn't exist. Creating it..."
-              if typeset -f wt_init_config >/dev/null 2>&1; then
-                wt_init_config
-              fi
+              # Issue #4 fix - wt_init_config is always available
+              wt_init_config
             fi
             local editor="${EDITOR:-${VISUAL:-vim}}"
             "$editor" "$config_file"
@@ -213,19 +208,9 @@ TUTORIAL
               return 1
             fi
             
-            # Create config if missing
+            # Create config if missing (Issue #4 fix - wt_init_config always available)
             if [[ ! -f "$config_file" ]]; then
-              if typeset -f wt_init_config >/dev/null 2>&1; then
-                wt_init_config >/dev/null 2>&1
-              else
-                mkdir -p "$(dirname "$config_file")"
-                cat > "$config_file" <<EOF
-# git-worktrees configuration
-editor=
-behavior.autoopen=true
-behavior.editor_prompt=silent
-EOF
-              fi
+              wt_init_config >/dev/null 2>&1
             fi
             
             # Update or append the value
@@ -430,19 +415,15 @@ USAGE
   done
 
   if ! wt_git_is_repo; then
-    if typeset -f wt_error_not_git_repo >/dev/null 2>&1; then
-      wt_error_not_git_repo
-    else
-      wt_msg_error "Not a git repository"
-    fi
+    # Issue #4 fix - wt_error_not_git_repo always available (stub or implementation)
+    wt_error_not_git_repo
     return 1
   fi
   
-  if ! command -v fzf >/dev/null; then
+  # Use centralized FZF detection (Issue #3 fix)
+  if ! wt_has_fzf; then
     FZF_MISSING=1
-    if typeset -f wt_error_fzf_missing >/dev/null 2>&1; then
-      wt_error_fzf_missing
-    fi
+    wt_error_fzf_missing 2>/dev/null || true
   fi
 
   # Fast path: wt <branch> auto-resolve
@@ -483,11 +464,18 @@ USAGE
   # ============================================================================
   # First-Run Experience (Phase 2 - v1.1.0)
   # ============================================================================
-  # Check if this looks like a first run (only 1 worktree = main repo)
+  # Check if this looks like a first run (only 1 worktree = main repo AND no first-run flag set)
   local worktree_count
   worktree_count=$(printf "%s" "$selectable" | sed '/^$/d' | wc -l | tr -d ' ')
   
-  if [[ "$worktree_count" -eq 1 ]]; then
+  # Only show first-run message once (track via config)
+  local first_run_shown
+  first_run_shown="$(wt_get_config WT_FIRST_RUN_SHOWN "")"
+  
+  if [[ "$worktree_count" -eq 1 && "$first_run_shown" != "true" ]]; then
+    # Mark as shown so we don't show again
+    wt_set_config WT_FIRST_RUN_SHOWN true 2>/dev/null || true
+    
     cat <<'FIRSTRUN'
 
 📂 No additional worktrees found.
@@ -511,6 +499,13 @@ USAGE
 FIRSTRUN
     return 0
   fi
+  
+  # If there's only 1 worktree but we've shown the first-run message before,
+  # just show a brief hint
+  if [[ "$worktree_count" -eq 1 ]]; then
+    echo "ℹ️  Only the main worktree exists. Use 'wt new <branch>' to create more."
+    return 0
+  fi
 
   # Prepend New branch row
   selectable="➕ New branch…"$'\t'$'(create)'$'\n'"$selectable"
@@ -527,14 +522,14 @@ FIRSTRUN
     echo "📝  Worktrees (branch -> dir):"
     printf "%s" "$selectable" | awk -F"\t" '{printf "- %s  \t%s\n", $1, $2}'
     printf "Pick a branch or 'New branch…': "; local sel; read -r sel
-    [[ -z $sel ]] && { echo "❌ No selection"; return 1; }
+    [[ -z $sel ]] && { wt_msg_error "No selection"; return 1; }
     if [[ "$sel" == "➕ New branch"* ]]; then
       wt_run wtnew; return $?
     elif [[ "$sel" == "🧵 Show detached"* ]]; then
       wt --detached --start list; return $?
     else
       local path; path="$(printf "%s" "$selectable" | awk -F"\t" -v b="$sel" '$1==b{print $2; exit}')"
-      [[ -z $path ]] && { echo "❌ Unknown selection"; return 1; }
+      [[ -z $path ]] && { wt_msg_error "Unknown selection"; return 1; }
       wt_open_or_show "$path"
       return 0
     fi
@@ -546,7 +541,7 @@ FIRSTRUN
 
   key="$(printf "%s" "$out" | head -n1)"
   line="$(printf "%s" "$out" | sed -n '2p')"
-  [[ -z $line ]] && { echo "❌ No selection"; return 1; }
+  [[ -z $line ]] && { wt_msg_error "No selection"; return 1; }
 
   local sel_branch sel_path tab
   tab=$'\t'
@@ -590,10 +585,10 @@ FIRSTRUN
           ("Set upstream (origin)")
             local b="${sel_branch}"; local remote="origin"
             if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
-              git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || echo "❌ Failed to set upstream"
+              git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || wt_msg_error "Failed to set upstream"
             else
               echo "ℹ️  Remote $remote/$b not found. Trying push -u…"
-              git -C "$sel_path" push -u "$remote" "$b" || echo "❌ Push failed"
+              git -C "$sel_path" push -u "$remote" "$b" || wt_msg_error "Push failed"
             fi;;
         esac
         return 0
@@ -618,14 +613,14 @@ FIRSTRUN
           (*) wtnew;;
         esac
       else
-        echo "❌ wtnew not available"
+        wt_msg_error "wtnew not available"
       fi
       ;;
     ctrl-r)
       if wt_has_cmd wtnew; then
         wtnew --prefer-reuse
       else
-        echo "❌ wtnew not available"
+        wt_msg_error "wtnew not available"
       fi
       ;;
     ctrl-a)
@@ -644,7 +639,7 @@ FIRSTRUN
           fi;;
         ("Open in terminal")
           local term_app="${WT_TERMINAL_APP:-iTerm}"
-          open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || echo "❌ Could not open terminal";;
+          open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || wt_msg_error "Could not open terminal";;
         ("Print cd command")
           echo "cd '$sel_path'";;
         ("Change editor")
@@ -685,9 +680,8 @@ FIRSTRUN
           local config_file="${HOME}/.config/git-worktrees/config"
           mkdir -p "$(dirname "$config_file")"
           if [[ ! -f "$config_file" ]]; then
-            if typeset -f wt_init_config >/dev/null 2>&1; then
-              wt_init_config >/dev/null 2>&1
-            fi
+            # Issue #4 fix - wt_init_config always available
+            wt_init_config >/dev/null 2>&1
           fi
           
           if [[ -f "$config_file" ]]; then
@@ -712,10 +706,10 @@ FIRSTRUN
         ("Set upstream (origin)")
           local b="${sel_branch}"; local remote="origin"
           if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
-            git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || echo "❌ Failed to set upstream"
+            git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || wt_msg_error "Failed to set upstream"
           else
             echo "ℹ️  Remote $remote/$b not found. Trying push -u…"
-            git -C "$sel_path" push -u "$remote" "$b" || echo "❌ Push failed"
+            git -C "$sel_path" push -u "$remote" "$b" || wt_msg_error "Push failed"
           fi;;
       esac
       ;;

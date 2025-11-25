@@ -24,6 +24,27 @@ typeset -g __WT_COMMON_SOURCED=1
 typeset -g WT_VERSION="1.1.1"
 
 # ============================================================================
+# Centralized Path Functions (Pure - No Mutable Global State)
+# ============================================================================
+# These are pure functions that compute paths on demand, respecting
+# environment variables at call time (not source time).
+
+# Get config directory path (pure function)
+wt_config_dir() {
+  printf "%s" "${XDG_CONFIG_HOME:-$HOME/.config}/git-worktrees"
+}
+
+# Get config file path (pure function)
+wt_config_file() {
+  printf "%s/config" "$(wt_config_dir)"
+}
+
+# Get cache directory path (pure function)
+wt_cache_dir() {
+  printf "%s" "${XDG_CACHE_HOME:-$HOME/.cache}/git-worktrees"
+}
+
+# ============================================================================
 # Global State Accessors (Prefer these over direct global access)
 # ============================================================================
 
@@ -52,11 +73,40 @@ wt_get_fzf_opts() {
 }
 
 # ============================================================================
+# Stub Functions for Optional Modules (Issue #4 fix)
+# ============================================================================
+# These provide no-op defaults so callers don't need `typeset -f` checks.
+# The actual module implementations override these when loaded.
+
+# Recovery module stubs
+wt_recovery_enabled() { return 1; }
+wt_diagnose_error() { echo "unknown"; }
+wt_error_message() { echo "An error occurred."; }
+wt_offer_recovery() { return 1; }
+wt_transaction_begin() { :; }
+wt_transaction_record() { :; }
+wt_transaction_commit() { :; }
+wt_transaction_rollback() { :; }
+
+# Discovery module stubs
+wt_show_hints() { :; }
+wt_show_contextual_help() { :; }
+
+# Error message stubs (actual implementations below, but define stubs for consistency)
+wt_error_not_git_repo() { echo "❌ Not a git repository" >&2; }
+wt_error_fzf_missing() { echo "⚠️  fzf not found" >&2; }
+
+# Validation module stubs
+wt_fuzzy_match_branch() { return 1; }
+wt_sanitize_branch_name() { printf "%s" "$1"; }
+
+# ============================================================================
 # Load enhanced modules (Phase 1: Core Infrastructure)
 # ============================================================================
 __WT_LIB_DIR="${${(%):-%x}:A:h}"
 
 # Load recovery module (error recovery, retry, transaction log)
+# Note: Module will override stubs defined above
 [[ -f "$__WT_LIB_DIR/wt-recovery.zsh" ]] && source "$__WT_LIB_DIR/wt-recovery.zsh"
 
 # Load validation module (input validation, sanitization, fuzzy matching)
@@ -232,6 +282,57 @@ wt_git_is_merged() {
   merge_base="$(git -C "$dir" merge-base "$branch" "$base" 2>/dev/null)" || return 1
   branch_sha="$(git -C "$dir" rev-parse "$branch" 2>/dev/null)" || return 1
   [[ "$merge_base" == "$branch_sha" ]]
+}
+
+# Find the default/base branch (pure function - no global state)
+# Usage: wt_find_default_branch [directory] [candidate1 candidate2 ...]
+# If no candidates provided, uses sensible defaults
+# Returns: branch name on stdout, empty if none found
+wt_find_default_branch() {
+  emulate -L zsh
+  local dir="${1:-.}"
+  shift 2>/dev/null || true
+  
+  # Use provided candidates or defaults (no global state)
+  local -a candidates
+  if (( $# > 0 )); then
+    candidates=("$@")
+  else
+    # Sensible defaults - computed inline, not stored globally
+    candidates=(
+      origin/main origin/master origin/develop
+      main master develop
+    )
+  fi
+  
+  local ref
+  for ref in "${candidates[@]}"; do
+    if git -C "$dir" rev-parse --verify -q "$ref" >/dev/null 2>&1; then
+      printf "%s" "$ref"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Check if worktree has uncommitted changes (Issue #8 fix)
+# Usage: wt_is_worktree_dirty <directory>
+# Returns: 0 if dirty (has changes), 1 if clean
+wt_is_worktree_dirty() {
+  emulate -L zsh
+  local dir="$1"
+  local status
+  status="$(git -C "$dir" status --porcelain --untracked-files=all 2>/dev/null)"
+  [[ -n "$status" ]]
+}
+
+# Get worktree status (porcelain output)
+# Usage: wt_get_worktree_status <directory>
+# Returns: porcelain status output
+wt_get_worktree_status() {
+  emulate -L zsh
+  local dir="$1"
+  git -C "$dir" status --porcelain --untracked-files=all 2>/dev/null
 }
 
 # ============================================================================
@@ -550,6 +651,20 @@ wt_parse_worktrees_table() {
 # Editor/IDE Opening (Single Source of Truth)
 # ============================================================================
 
+# Check if app is a JetBrains IDE
+# Usage: _wt_is_jetbrains_ide <app_name>
+_wt_is_jetbrains_ide() {
+  local app="$1"
+  case "$app" in
+    "Android Studio"|"IntelliJ IDEA"|"IntelliJ IDEA CE"|"PyCharm"|"WebStorm"|"PhpStorm"|"RubyMine"|"GoLand"|"CLion"|"Rider"|"DataGrip"|"Fleet")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # Open a directory in the specified editor/IDE
 # Usage: wt_open_in_editor <directory> [app_name]
 # This is the ONLY function that should handle editor opening logic.
@@ -578,18 +693,23 @@ wt_open_in_editor() {
   fi
   
   # Determine what to open (project file detection)
+  # Only use .idea/project files for JetBrains IDEs; other editors should open the directory
   local target="$dir"
-  if [[ -d "$dir/.idea" ]]; then
-    target="$dir/.idea"
-  elif [[ -f "$dir/settings.gradle.kts" ]]; then
-    target="$dir/settings.gradle.kts"
-  elif [[ -f "$dir/settings.gradle" ]]; then
-    target="$dir/settings.gradle"
-  elif [[ -f "$dir/build.gradle.kts" ]]; then
-    target="$dir/build.gradle.kts"
-  elif [[ -f "$dir/build.gradle" ]]; then
-    target="$dir/build.gradle"
+  if _wt_is_jetbrains_ide "$app_name"; then
+    # JetBrains IDEs work best when opening .idea or gradle files
+    if [[ -d "$dir/.idea" ]]; then
+      target="$dir/.idea"
+    elif [[ -f "$dir/settings.gradle.kts" ]]; then
+      target="$dir/settings.gradle.kts"
+    elif [[ -f "$dir/settings.gradle" ]]; then
+      target="$dir/settings.gradle"
+    elif [[ -f "$dir/build.gradle.kts" ]]; then
+      target="$dir/build.gradle.kts"
+    elif [[ -f "$dir/build.gradle" ]]; then
+      target="$dir/build.gradle"
+    fi
   fi
+  # For non-JetBrains editors (VS Code, Cursor, Sublime, vim, etc.), just open the directory
   
   # Open with appropriate command
   if command -v open >/dev/null 2>&1; then
@@ -740,15 +860,12 @@ typeset -gA WT_CONFIG
 wt_find_config_file() {
   emulate -L zsh
   setopt local_options pipefail
-  local cfg
+  # Use global constant, allow override via WT_CONFIG_PATH
   if [[ -n ${WT_CONFIG_PATH:-} ]]; then
-    cfg="$WT_CONFIG_PATH"
-  elif [[ -n ${XDG_CONFIG_HOME:-} && -d ${XDG_CONFIG_HOME}/git-worktrees ]]; then
-    cfg="${XDG_CONFIG_HOME}/git-worktrees/config"
+    printf "%s" "$WT_CONFIG_PATH"
   else
-    cfg="${HOME:-$PWD}/.config/git-worktrees/config"
+    printf "%s" "$(wt_config_file)"
   fi
-  printf "%s" "$cfg"
 }
 
 wt_load_config() {
@@ -785,14 +902,14 @@ wt_get_config() {
   fi
 }
 
-# Set a config value in ~/.config/git-worktrees/config
+# Set a config value in config file
 # Usage: wt_set_config KEY VALUE
 wt_set_config() {
   emulate -L zsh
   setopt local_options pipefail
   local key="$1" value="$2"
-  local cfg_dir="$HOME/.config/git-worktrees"
-  local cfg_file="$cfg_dir/config"
+  local cfg_dir="$(wt_config_dir)"
+  local cfg_file="$(wt_config_file)"
   
   mkdir -p "$cfg_dir" 2>/dev/null || true
   
@@ -801,8 +918,13 @@ wt_set_config() {
   
   # Update or append to file
   if [[ -f "$cfg_file" ]] && grep -q "^${key}=" "$cfg_file" 2>/dev/null; then
-    # Key exists - update it (using portable sed -i)
-    wt_sed_i "s|^${key}=.*|${key}=${value}|" "$cfg_file"
+    # Key exists - update it using grep + awk (safer than sed for special chars)
+    local tmp_file="${cfg_file}.tmp.$$"
+    awk -v k="$key" -v v="$value" '
+      BEGIN { FS="="; OFS="=" }
+      $1 == k { print k, v; next }
+      { print }
+    ' "$cfg_file" > "$tmp_file" && mv "$tmp_file" "$cfg_file"
   else
     # Key doesn't exist - append it
     echo "${key}=${value}" >> "$cfg_file"

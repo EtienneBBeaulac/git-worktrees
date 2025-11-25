@@ -67,17 +67,13 @@ USAGE
 
   # -------- sanity checks --------
   if ! wt_git_is_repo; then
-    if typeset -f wt_error_not_git_repo >/dev/null 2>&1; then
-      wt_error_not_git_repo
-    else
-      wt_msg_error "Not a git repository"
-    fi
+    # Issue #4 fix - wt_error_not_git_repo always available
+    wt_error_not_git_repo
     return 1
   fi
   
-  if ! command -v fzf >/dev/null; then
-    FZF_MISSING=1
-  fi
+  # Use centralized FZF detection (Issue #3 fix)
+  wt_has_fzf || FZF_MISSING=1
 
   # Option: prune stale
   if (( prune_stale )); then
@@ -86,22 +82,7 @@ USAGE
     return 0
   fi
 
-  # Fallback if wt_short_ref is not available from common lib
-  if ! typeset -f wt_short_ref >/dev/null 2>&1; then
-    wt_short_ref() {
-      local sel="$1" short=""
-      if [[ "$sel" =~ ^refs/heads/(.+)$ ]]; then
-        short="${match[1]}"
-      elif [[ "$sel" =~ ^refs/remotes/([^/]+)/(.+)$ ]]; then
-        short="${match[2]}"
-      elif [[ "$sel" =~ ^remotes/([^/]+)/(.+)$ ]]; then
-        short="${match[2]}"
-      else
-        short="$sel"
-      fi
-      printf "%s" "$short"
-    }
-  fi
+  # Issue #4 fix - wt_short_ref is always available from wt-common.zsh
 
   # Normalize requested branch
   local requested_branch=""
@@ -117,7 +98,8 @@ USAGE
 
   # -------- parse worktrees via shared helper (branch\tpath) --------
   local selectable porcelain
-  porcelain="$(git worktree list --porcelain 2>/dev/null)"
+  # Issue #2 fix - use wrapper function
+  porcelain="$(wt_git_worktree_list_porcelain)"
   selectable="$(wt_parse_worktrees_porcelain 0 "$porcelain")"
 
   if [[ -n ${WT_DEBUG:-${WTOPEN_DEBUG:-}} ]]; then
@@ -176,15 +158,25 @@ USAGE
                 --with-nth=1 --delimiter=$'\t' \
                 --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
                 --preview-window=right,60%)"
-        [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
+        [[ -z "$out" ]] && { wt_msg_error "No selection"; return 1; }
         target_branch="${out%%\t*}"; target_dir="${out#*\t}"
       else
-        echo "❌ Multiple worktrees match '$requested_branch'. Re-run with --fzf to choose."
+        # FZF not installed - show the matches and let user pick manually
+        wt_msg_error "Multiple worktrees match '$requested_branch':"
+        echo ""
+        printf "%s\n" "$matches" | awk -F"\t" '{printf "  • %s → %s\n", $1, $2}'
+        echo ""
+        echo "💡 To choose interactively, install fzf:"
+        echo "   brew install fzf    # macOS"
+        echo "   apt install fzf     # Ubuntu/Debian"
+        echo ""
+        echo "   Or specify the exact path:"
+        echo "   wtopen -d /path/to/worktree"
         return 1
       fi
     fi
   elif [[ -n $requested_branch && -z $matches && $force_fzf -eq 0 ]]; then
-    echo "❌ Branch '$requested_branch' not in any worktree"
+    wt_msg_error "Branch '$requested_branch' not in any worktree"
     return 1
   fi
 
@@ -194,7 +186,7 @@ USAGE
       echo "📝  Worktrees (branch -> dir):"
       printf "%s" "$selectable" | awk -F"\t" '{printf "- %s  \t%s\n", $1, $2}'
       printf "Pick a branch: "; read -r requested_branch
-      [[ -z $requested_branch ]] && { echo "❌ No branch chosen"; return 1; }
+      [[ -z $requested_branch ]] && { wt_msg_error "No branch chosen"; return 1; }
       local found=0
       local l
       local IFS=$'\n'
@@ -204,7 +196,7 @@ USAGE
           target_branch="$sbr"; target_dir="$wt_path"; found=1; break
         fi
       done
-      (( found )) || { echo "❌ Branch '$requested_branch' not in any worktree"; return 1; }
+      (( found )) || { wt_msg_error "Branch '$requested_branch' not in any worktree"; return 1; }
     else
       local out
       out="$(printf "%s" "$selectable" \
@@ -213,12 +205,12 @@ USAGE
               --with-nth=1 --delimiter=$'\t' \
               --preview 'd=$(printf "%s" {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; cd "$d" && git log --oneline -n 20 --decorate --graph --color=always; fi' \
               --preview-window=right,60%)"
-      [[ -z "$out" ]] && { echo "❌ No selection"; return 1; }
+      [[ -z "$out" ]] && { wt_msg_error "No selection"; return 1; }
       target_branch="${out%%\t*}"; target_dir="${out#*\t}"; target_dir="${target_dir%%\t*}"
     fi
   fi
 
-  [[ -z $target_dir ]] && { echo "❌ Could not resolve target worktree"; return 1; }
+  [[ -z $target_dir ]] && { wt_msg_error "Could not resolve target worktree"; return 1; }
 
   if (( dry_run )); then
     echo "DRY-RUN: would open $target_dir (branch $target_branch)"

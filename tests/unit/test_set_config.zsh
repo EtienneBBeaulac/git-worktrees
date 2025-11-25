@@ -22,6 +22,8 @@ export HOME="$TEST_HOME"
 trap 'rm -rf "$TEST_HOME"; export HOME="$ORIG_HOME"' EXIT
 
 # Reset config state
+# Note: wt_config_dir() and wt_config_file() are pure functions that
+# compute paths based on current HOME, so no need to update constants
 typeset -gA WT_CONFIG=()
 
 # Test 1: Creates config directory if missing
