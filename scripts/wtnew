@@ -194,7 +194,8 @@ USAGE
   new_branch="$short_branch"
 
   # Strict validation of local branch name (no mutation/sanitization)
-  if ! [[ "$new_branch" =~ ^[A-Za-z0-9/_\-]+$ ]]; then
+  # Allow: alphanumeric, slashes, underscores, hyphens, and dots (for versions like release/1.0.0)
+  if ! [[ "$new_branch" =~ ^[A-Za-z0-9/_.\-]+$ ]]; then
     echo "❌ Invalid branch name: $new_branch"; return 1
   fi
   git check-ref-format --branch "$new_branch" \

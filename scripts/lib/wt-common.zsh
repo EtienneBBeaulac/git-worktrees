@@ -97,19 +97,6 @@ wt_parse_worktrees_table() {
   ' <<< "$porcelain_text"
 }
 
-# Split a tab-delimited line into two fields via $reply array
-# Usage: wt_split_tab "A\tB"; echo ${reply[1]} ${reply[2]}
-wt_split_tab() {
-  emulate -L zsh
-  setopt local_options pipefail
-  local line="$1" tab
-  tab=$'\t'
-  local left="${line%%${tab}*}"
-  local right="${line#*${tab}}"
-  right="${right%%${tab}*}"
-  reply=("$left" "$right")
-}
-
 # Open a directory in Android Studio (robust macOS chain)
 wt_open_in_android_studio() {
   emulate -L zsh
@@ -274,9 +261,9 @@ wt_load_config() {
     key="${line%%=*}"
     val="${line#*=}"
     [[ -z "$key" ]] && continue
-    # Trim whitespace around key
-    key="${key##[[:space:]]*}"
-    key="${key%%[[:space:]]*}"
+    # Trim leading and trailing whitespace from key (zsh extended glob)
+    key="${key#"${key%%[^[:space:]]*}"}"   # Remove leading whitespace
+    key="${key%"${key##*[^[:space:]]}"}"   # Remove trailing whitespace
     WT_CONFIG[$key]="$val"
   done < "$file"
 }
@@ -341,6 +328,21 @@ wt_xargs_supports_parallel() {
   command -v xargs >/dev/null 2>&1 || return 1
   printf "%s\0" x | xargs -0 -P 2 -n 1 echo >/dev/null 2>&1 || return 1
   return 0
+}
+
+# Portable sed in-place edit (handles macOS vs GNU sed differences)
+# Usage: wt_sed_i 's/old/new/' file
+wt_sed_i() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local pattern="$1" file="$2"
+  if [[ "$OSTYPE" == darwin* ]]; then
+    # macOS BSD sed requires '' after -i
+    sed -i '' "$pattern" "$file"
+  else
+    # GNU sed uses -i directly
+    sed -i "$pattern" "$file"
+  fi
 }
 
 # ----------------------
@@ -523,6 +525,10 @@ wt_first_run_editor_setup() {
   emulate -L zsh
   setopt local_options pipefail
   
+  # Handle interrupt gracefully - use auto-detection if user cancels
+  local _interrupted=0
+  trap '_interrupted=1' INT
+  
   echo "" >&2
   echo "👋 Welcome to git-worktrees!" >&2
   echo "" >&2
@@ -540,7 +546,18 @@ wt_first_run_editor_setup() {
   printf "Choice [1-9]: " >&2
   
   local choice
-  read -r choice
+  read -r choice || _interrupted=1
+  
+  # Handle Ctrl-C: fall back to auto-detection
+  if (( _interrupted )); then
+    echo "" >&2
+    echo "⚠️  Setup interrupted. Using auto-detection." >&2
+    trap - INT
+    local detected
+    detected="$(wt_detect_editor 2>/dev/null)" || detected=""
+    [[ -n "$detected" ]] && echo "$detected"
+    return 0
+  fi
   
   local selected=""
   case "$choice" in
@@ -575,7 +592,7 @@ wt_first_run_editor_setup() {
   if typeset -f wt_init_config >/dev/null 2>&1; then
     wt_init_config >/dev/null 2>&1
     if [[ -f "$config_file" ]]; then
-      sed -i.bak "s|^editor=.*|editor=${selected}|" "$config_file" && rm -f "${config_file}.bak"
+      wt_sed_i "s|^editor=.*|editor=${selected}|" "$config_file"
     fi
   else
     cat > "$config_file" <<EOF
@@ -599,8 +616,9 @@ EOF
   echo "    export WT_EDITOR=\"Different Editor\"" >&2
   echo "" >&2
   printf "Press Enter to continue... " >&2
-  read -r
+  read -r || true  # Ignore Ctrl-C on final prompt
   
+  trap - INT  # Reset interrupt handler
   [[ "$selected" != "none" ]] && echo "$selected"
   return 0
 }

@@ -252,7 +252,7 @@ EOF
             
             # Update or append the value
             if grep -q "^${key}=" "$config_file" 2>/dev/null; then
-              sed -i.bak "s|^${key}=.*|${key}=${value}|" "$config_file" && rm -f "${config_file}.bak"
+              wt_sed_i "s|^${key}=.*|${key}=${value}|" "$config_file"
               echo "✅ Updated: ${key}=${value}"
             else
               echo "${key}=${value}" >> "$config_file"
@@ -773,7 +773,7 @@ FIRSTRUN
           
           if [[ -f "$config_file" ]]; then
             if grep -q "^editor=" "$config_file" 2>/dev/null; then
-              sed -i.bak "s|^editor=.*|editor=${selected}|" "$config_file" && rm -f "${config_file}.bak"
+              wt_sed_i "s|^editor=.*|editor=${selected}|" "$config_file"
             else
               echo "editor=${selected}" >> "$config_file"
             fi

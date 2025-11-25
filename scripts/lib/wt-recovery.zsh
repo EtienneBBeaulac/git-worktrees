@@ -402,6 +402,19 @@ wt_transaction_commit() {
   WT_TRANSACTION_ACTIVE=0
 }
 
+# Portable reverse file reader (tac is not available on macOS)
+_wt_tac() {
+  if command -v tac >/dev/null 2>&1; then
+    tac "$@"
+  elif command -v tail >/dev/null 2>&1; then
+    # macOS: tail -r reverses lines
+    tail -r "$@" 2>/dev/null || awk '{a[NR]=$0} END {for(i=NR;i>=1;i--) print a[i]}' "$@"
+  else
+    # Fallback: pure awk
+    awk '{a[NR]=$0} END {for(i=NR;i>=1;i--) print a[i]}' "$@"
+  fi
+}
+
 # Rollback transaction (undo all recorded actions)
 wt_transaction_rollback() {
   (( WT_TRANSACTION_ACTIVE )) || return 0
@@ -410,30 +423,28 @@ wt_transaction_rollback() {
   
   echo "↩️  Rolling back changes..."
   
-  # Read log in reverse and undo
-  tac "$WT_TRANSACTION_LOG" 2>/dev/null | while IFS='|' read -r action details; do
+  # Read log in reverse and undo (use process substitution to avoid subshell)
+  local action details
+  while IFS='|' read -r action details; do
     [[ "$action" =~ ^# ]] && continue  # Skip comments
+    [[ -z "$action" ]] && continue
     
     case "$action" in
       worktree_add)
-        local path="$details"
-        echo "   • Removing worktree: $path"
-        git worktree remove --force "$path" 2>/dev/null || true
+        echo "   • Removing worktree: $details"
+        git worktree remove --force "$details" 2>/dev/null || true
         ;;
       branch_create)
-        local branch="$details"
-        echo "   • Deleting branch: $branch"
-        git branch -D "$branch" 2>/dev/null || true
+        echo "   • Deleting branch: $details"
+        git branch -D "$details" 2>/dev/null || true
         ;;
       file_create)
-        local file="$details"
-        echo "   • Removing file: $file"
-        rm -rf "$file" 2>/dev/null || true
+        echo "   • Removing file: $details"
+        rm -rf "$details" 2>/dev/null || true
         ;;
       dir_create)
-        local dir="$details"
-        echo "   • Removing directory: $dir"
-        rm -rf "$dir" 2>/dev/null || true
+        echo "   • Removing directory: $details"
+        rm -rf "$details" 2>/dev/null || true
         ;;
       config_set)
         local key="${details%% *}"
@@ -442,7 +453,7 @@ wt_transaction_rollback() {
         git -C "$repo" config --unset "$key" 2>/dev/null || true
         ;;
     esac
-  done
+  done < <(_wt_tac "$WT_TRANSACTION_LOG")
   
   wt_transaction_commit
   echo "✅ Rollback complete"

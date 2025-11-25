@@ -17,10 +17,4 @@ OUT1=$(wt_parse_worktrees_porcelain 1 "$PORCELAIN")
 [[ $(printf "%s\n" "$OUT1" | wc -l | tr -d ' ') == 3 ]]
 [[ "$(printf "%s\n" "$OUT1" | sed -n '3p')" == $'(detached)	/tmp/det' ]]
 
-# split helper
-wt_split_tab $'feature/x	/tmp/b'
-[[ ${#reply[@]} -eq 2 ]]
-[[ "${reply[1]}" == "feature/x" ]]
-[[ "${reply[2]}" == "/tmp/b" ]]
-
 echo "parse porcelain unit OK"
