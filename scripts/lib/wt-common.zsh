@@ -21,7 +21,7 @@ unsetopt xtrace verbose
 typeset -g __WT_COMMON_SOURCED=1
 
 # Version (automatically updated by GitHub Actions on release)
-typeset -g WT_VERSION="1.1.1"
+typeset -g WT_VERSION="1.1.2"
 
 # ============================================================================
 # Centralized Path Functions (Pure - No Mutable Global State)
