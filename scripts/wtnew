@@ -1,12 +1,24 @@
 # wtnew: create/open a Git worktree for a new or existing branch
 # macOS + zsh/bash friendly. Requires: git, (optional) fzf
+
+# Resolve script directory and source common helpers at load time (no subshell)
+emulate -L zsh
+setopt pipefail
+typeset -g WTNEW__SCRIPT_FILE WTNEW__SCRIPT_DIR WTNEW__COMMON_LIB
+WTNEW__SCRIPT_FILE=${(%):-%N}
+if [[ -n $WTNEW__SCRIPT_FILE && -f $WTNEW__SCRIPT_FILE ]]; then
+  WTNEW__SCRIPT_DIR="${WTNEW__SCRIPT_FILE:A:h}"
+else
+  WTNEW__SCRIPT_DIR="${0:A:h}"
+fi
+WTNEW__COMMON_LIB="${WTNEW__SCRIPT_DIR}/lib/wt-common.zsh"
+[[ -f "$WTNEW__COMMON_LIB" ]] && source "$WTNEW__COMMON_LIB" || true
+
 wtnew() {
   emulate -L zsh
   setopt local_options pipefail no_xtrace
 
-  # Source common helpers if available (includes recovery, validation, discovery modules)
-  local __WT_LIB="${0:A:h}/lib/wt-common.zsh"
-  [[ -f "$__WT_LIB" ]] && source "$__WT_LIB"
+  # helpers are sourced at load time
   
   # Enable error recovery features (transaction log for rollback)
   if wt_recovery_enabled 2>/dev/null; then
@@ -72,8 +84,8 @@ USAGE
   fi
 
   # -------- sanity checks --------
-  if ! git rev-parse --git-dir &>/dev/null; then
-    echo "❌ Not a git repo"
+  if ! wt_git_is_repo; then
+    wt_msg_error "Not a git repo"
     if typeset -f wt_show_hints >/dev/null 2>&1; then
       echo ""
       echo "💡 Hint: Run this command from inside a git repository"
@@ -527,28 +539,7 @@ USAGE
     
     # Silent auto-open (no prompt)
     echo "🚀  Opening in ${open_app}…"
-    if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
-      wt_open_in_android_studio "$wt_dir" "$open_app"
-    else
-      # Only use 'studio' command if app is actually Android Studio
-      if [[ "$open_app" == "Android Studio" ]] && command -v studio >/dev/null 2>&1; then
-        studio "$wt_dir" >/dev/null 2>&1 || true
-      else
-        if [[ -d "$wt_dir/.idea" ]]; then
-          open -a "$open_app" "$wt_dir/.idea" >/dev/null 2>&1 || true
-        elif [[ -f "$wt_dir/settings.gradle" || -f "$wt_dir/settings.gradle.kts" ]]; then
-          local sg="$wt_dir/settings.gradle"
-          [[ -f "$wt_dir/settings.gradle.kts" ]] && sg="$wt_dir/settings.gradle.kts"
-          open -a "$open_app" "$sg" >/dev/null 2>&1 || true
-        elif [[ -f "$wt_dir/build.gradle" || -f "$wt_dir/build.gradle.kts" ]]; then
-          local bg="$wt_dir/build.gradle"
-          [[ -f "$wt_dir/build.gradle.kts" ]] && bg="$wt_dir/build.gradle.kts"
-          open -a "$open_app" "$bg" >/dev/null 2>&1 || true
-        else
-          open -a "$open_app" "$wt_dir" >/dev/null 2>&1 || true
-        fi
-      fi
-    fi
+    wt_open_in_editor "$wt_dir" "$open_app"
     echo "📂  If no window appears, open it manually via File → Open… → $wt_dir"
   else
     echo "✅  Worktree ready at: $wt_dir"

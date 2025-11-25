@@ -66,11 +66,11 @@ USAGE
   done
 
   # -------- sanity checks --------
-  if ! git rev-parse --git-dir &>/dev/null; then
+  if ! wt_git_is_repo; then
     if typeset -f wt_error_not_git_repo >/dev/null 2>&1; then
       wt_error_not_git_repo
     else
-      echo "❌ Not a git repository" >&2
+      wt_msg_error "Not a git repository"
     fi
     return 1
   fi
@@ -240,28 +240,7 @@ USAGE
     # Show selection context
     echo "✓ Opening worktree: $(basename "$target_dir")"
     echo "🚀  Opening in ${open_app}…"
-    if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
-      wt_open_in_android_studio "$target_dir" "$open_app"
-    else
-      # Only use 'studio' command if app is actually Android Studio
-      if [[ "$open_app" == "Android Studio" ]] && command -v studio >/dev/null 2>&1; then
-        studio "$target_dir" >/dev/null 2>&1 || true
-      else
-        if [[ -d "$target_dir/.idea" ]]; then
-          open -a "$open_app" "$target_dir/.idea" >/dev/null 2>&1 || true
-        elif [[ -f "$target_dir/settings.gradle" || -f "$target_dir/settings.gradle.kts" ]]; then
-          local sg="$target_dir/settings.gradle"
-          [[ -f "$target_dir/settings.gradle.kts" ]] && sg="$target_dir/settings.gradle.kts"
-          open -a "$open_app" "$sg" >/dev/null 2>&1 || true
-        elif [[ -f "$target_dir/build.gradle" || -f "$target_dir/build.gradle.kts" ]]; then
-          local bg="$target_dir/build.gradle"
-          [[ -f "$target_dir/build.gradle.kts" ]] && bg="$target_dir/build.gradle.kts"
-          open -a "$open_app" "$bg" >/dev/null 2>&1 || true
-        else
-          open -a "$open_app" "$target_dir" >/dev/null 2>&1 || true
-        fi
-      fi
-    fi
+    wt_open_in_editor "$target_dir" "$open_app"
     echo "📂  If no window appears, open it manually via File → Open… → $target_dir"
   else
     echo "$target_dir"

@@ -154,48 +154,26 @@ TUTORIAL
     case "$1" in
       new|n)
         shift
-        if command -v wtnew >/dev/null 2>&1; then
-          wtnew "$@"
-          return $?
-        else
-          echo "❌ wtnew command not found"; return 1
-        fi
+        wt_run wtnew "$@"; return $?
         ;;
       remove|rm)
         shift
-        if command -v wtrm >/dev/null 2>&1; then
-          wtrm "$@"
-          return $?
-        else
-          echo "❌ wtrm command not found"; return 1
-        fi
+        wt_run wtrm "$@"; return $?
         ;;
       open|o)
         shift
-        if command -v wtopen >/dev/null 2>&1; then
-          wtopen "$@"
-          return $?
-        else
-          echo "❌ wtopen command not found"; return 1
-        fi
+        wt_run wtopen "$@"; return $?
         ;;
       list|ls)
         shift
-        if command -v wtls >/dev/null 2>&1; then
-          wtls "$@"
-          return $?
-        else
-          echo "❌ wtls command not found"; return 1
-        fi
+        wt_run wtls "$@"; return $?
         ;;
       prune)
         shift
-        if command -v wtrm >/dev/null 2>&1; then
-          wtrm --prune-only "$@"
-          return $?
+        if wt_has_cmd wtrm; then
+          wtrm --prune-only "$@"; return $?
         else
-          git worktree prune -v
-          return $?
+          git worktree prune -v; return $?
         fi
         ;;
       config)
@@ -386,16 +364,22 @@ HELP
 
   # Centralized config: prefer runtime env/flags; fall back to config
   typeset -gA WT_CONFIG
-  typeset cfg_file_hub
   wt_load_config 2>/dev/null || true
   enter_default="${enter_default:-${WTHUB_ENTER_DEFAULT:-}}"
   if [[ -z ${enter_default:-} ]]; then
-    # Back-compat: also read historical hub file if present
-    cfg_file_hub="$HOME/.config/git-worktrees/hub"
-    if [[ -f "$cfg_file_hub" ]]; then
-      enter_default="$(awk -F'=' '/^ENTER_DEFAULT=/{print $2}' "$cfg_file_hub" | tail -n1)"
-    else
-      enter_default="$(wt_get_config WT_ENTER_BEHAVIOR open)"
+    # Check main config first
+    enter_default="$(wt_get_config WT_ENTER_BEHAVIOR "")"
+    # Back-compat: migrate from historical hub file if present
+    if [[ -z "$enter_default" ]]; then
+      local cfg_file_hub="$HOME/.config/git-worktrees/hub"
+      if [[ -f "$cfg_file_hub" ]]; then
+        enter_default="$(awk -F'=' '/^ENTER_DEFAULT=/{print $2}' "$cfg_file_hub" | tail -n1)"
+        # Migrate to main config and remove old file
+        if [[ -n "$enter_default" ]]; then
+          wt_set_config WT_ENTER_BEHAVIOR "$enter_default" 2>/dev/null || true
+          rm -f "$cfg_file_hub" 2>/dev/null || true
+        fi
+      fi
     fi
   fi
   [[ -z ${enter_default:-} ]] && enter_default="open"
@@ -445,11 +429,11 @@ USAGE
     esac
   done
 
-  if ! git rev-parse --git-dir &>/dev/null; then
+  if ! wt_git_is_repo; then
     if typeset -f wt_error_not_git_repo >/dev/null 2>&1; then
       wt_error_not_git_repo
     else
-      echo "❌ Not a git repository" >&2
+      wt_msg_error "Not a git repository"
     fi
     return 1
   fi
@@ -470,28 +454,16 @@ USAGE
     fi
     # Use common porcelain parser to resolve existing worktree path for branch
     local porcelain rows
-    porcelain="$(git worktree list --porcelain 2>/dev/null)"
+    porcelain="$(wt_git_worktree_list_porcelain)"
     rows="$(wt_parse_worktrees_porcelain 0 "$porcelain")"
     existing_dir="$(printf "%s\n" "$rows" | awk -F"\t" -v b="$br_short" '$1==b{print $2; exit}')"
     if [[ -n $existing_dir && -d $existing_dir ]]; then
-      local detected_app
-      detected_app="$(wt_get_editor 2>/dev/null)" || true
-      if [[ -n "$detected_app" ]]; then
-        echo "🚀  Opening in ${detected_app}…"
-        if typeset -f wt_open_in_android_studio >/dev/null 2>&1; then
-          wt_open_in_android_studio "$existing_dir" "$detected_app"
-        else
-          open -a "$detected_app" "$existing_dir" >/dev/null 2>&1 || true
-        fi
-      else
-        echo "ℹ️  Worktree is at: $existing_dir"
-      fi
+      wt_open_or_show -v "$existing_dir"
       return 0
     else
       # Fallback to wtnew for creation
-      if command -v wtnew >/dev/null 2>&1; then
-        wtnew -n "$br_short"
-        return $?
+      if wt_has_cmd wtnew; then
+        wtnew -n "$br_short"; return $?
       else
         echo "ℹ️  No existing worktree for '$br_short'. Install wtnew to create."; return 1
       fi
@@ -500,17 +472,12 @@ USAGE
 
   # Branch-first start (reuse wtnew)
   if [[ "$start_mode" == "new" ]]; then
-    if command -v wtnew >/dev/null 2>&1; then
-      wtnew
-      return $?
-    else
-      echo "❌ wtnew not available"; return 1
-    fi
+    wt_run wtnew; return $?
   fi
 
   # Build list (branch\tpath). Detached hidden by default.
   local selectable porcelain
-  porcelain="$(git worktree list --porcelain 2>/dev/null)"
+  porcelain="$(wt_git_worktree_list_porcelain)"
   selectable="$(wt_parse_worktrees_porcelain ${include_detached} "$porcelain")"
 
   # ============================================================================
@@ -562,26 +529,13 @@ FIRSTRUN
     printf "Pick a branch or 'New branch…': "; local sel; read -r sel
     [[ -z $sel ]] && { echo "❌ No selection"; return 1; }
     if [[ "$sel" == "➕ New branch"* ]]; then
-      if command -v wtnew >/dev/null 2>&1; then
-        wtnew
-      else
-        echo "❌ wtnew not available"
-      fi
-      return $?
+      wt_run wtnew; return $?
     elif [[ "$sel" == "🧵 Show detached"* ]]; then
       wt --detached --start list; return $?
     else
       local path; path="$(printf "%s" "$selectable" | awk -F"\t" -v b="$sel" '$1==b{print $2; exit}')"
       [[ -z $path ]] && { echo "❌ Unknown selection"; return 1; }
-      local detected_app
-      detected_app="$(wt_get_editor 2>/dev/null)" || true
-      if [[ -n "$detected_app" ]]; then
-        typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-          && wt_open_in_android_studio "$path" "$detected_app" \
-          || open -a "$detected_app" "$path" >/dev/null 2>&1 || true
-      else
-        echo "ℹ️  Worktree is at: $path"
-      fi
+      wt_open_or_show "$path"
       return 0
     fi
   fi
@@ -611,8 +565,7 @@ FIRSTRUN
 
   # New branch row
   if [[ "$sel_branch" == "➕ New branch"* ]]; then
-    command -v wtnew >/dev/null 2>&1 && wtnew || echo "❌ wtnew not available"
-    return $?
+    wt_run wtnew; return $?
   fi
 
   # Show detached toggle row
@@ -629,20 +582,11 @@ FIRSTRUN
         outa="$(printf "%s\n" "Open" "Show path" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
           | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
         case "$outa" in
-          ("Open")
-            local detected_app
-            detected_app="$(wt_get_editor 2>/dev/null)" || true
-            if [[ -n "$detected_app" ]]; then
-              typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-                && wt_open_in_android_studio "$sel_path" "$detected_app" \
-                || open -a "$detected_app" "$sel_path" >/dev/null 2>&1 || true
-            else
-              echo "ℹ️  Worktree is at: $sel_path"
-            fi;;
+          ("Open") wt_open_or_show "$sel_path";;
           ("Show path") echo "$sel_path";;
-          ("Remove") command -v wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
-          ("Remove all detached") command -v wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
-          ("Prune stale") command -v wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
+          ("Remove") wt_run wtrm -d "$sel_path";;
+          ("Remove all detached") wt_run wtrm --rm-detached;;
+          ("Prune stale") if wt_has_cmd wtrm; then wtrm --prune-only; else git worktree prune -v; fi;;
           ("Set upstream (origin)")
             local b="${sel_branch}"; local remote="origin"
             if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
@@ -654,32 +598,16 @@ FIRSTRUN
         esac
         return 0
       fi
-      local detected_app
-      detected_app="$(wt_get_editor 2>/dev/null)" || true
-      if [[ -n "$detected_app" ]]; then
-        typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-          && wt_open_in_android_studio "$sel_path" "$detected_app" \
-          || open -a "$detected_app" "$sel_path" >/dev/null 2>&1 || true
-      else
-        echo "ℹ️  Worktree is at: $sel_path"
-      fi
+      wt_open_or_show "$sel_path"
       ;;
     ctrl-d)
-      if command -v wtrm >/dev/null 2>&1; then
-        wtrm -d "$sel_path"
-      else
-        echo "❌ wtrm not available"
-      fi
+      wt_run wtrm -d "$sel_path"
       ;;
     ctrl-p)
-      if command -v wtrm >/dev/null 2>&1; then
-        wtrm --prune-only
-      else
-        git worktree prune -v || true
-      fi
+      if wt_has_cmd wtrm; then wtrm --prune-only; else git worktree prune -v || true; fi
       ;;
     ctrl-n)
-      if command -v wtnew >/dev/null 2>&1; then
+      if wt_has_cmd wtnew; then
         # Choose creation mode
         local mode
         mode="$(printf "%s\n" "Create (smart reuse)" "Create (force reuse)" "Create (new dir)" \
@@ -694,7 +622,7 @@ FIRSTRUN
       fi
       ;;
     ctrl-r)
-      if command -v wtnew >/dev/null 2>&1; then
+      if wt_has_cmd wtnew; then
         wtnew --prefer-reuse
       else
         echo "❌ wtnew not available"
@@ -706,16 +634,7 @@ FIRSTRUN
       outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Change editor" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
         | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
         case "$outa" in
-        ("Open")
-          local detected_app
-          detected_app="$(wt_get_editor 2>/dev/null)" || true
-          if [[ -n "$detected_app" ]]; then
-            typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-              && wt_open_in_android_studio "$sel_path" "$detected_app" \
-              || open -a "$detected_app" "$sel_path" >/dev/null 2>&1 || true
-          else
-            echo "ℹ️  Worktree is at: $sel_path"
-          fi;;
+        ("Open") wt_open_or_show "$sel_path";;
         ("Show path") echo "$sel_path";;
         ("Copy path")
           if command -v pbcopy >/dev/null 2>&1; then
@@ -787,9 +706,9 @@ FIRSTRUN
             echo "✅ Saved: $selected"
           fi
           ;;
-        ("Remove") command -v wtrm >/dev/null 2>&1 && wtrm -d "$sel_path" || echo "❌ wtrm not available";;
-        ("Remove all detached") command -v wtrm >/dev/null 2>&1 && wtrm --rm-detached || echo "❌ wtrm not available";;
-        ("Prune stale") command -v wtrm >/dev/null 2>&1 && wtrm --prune-only || git worktree prune -v;;
+        ("Remove") wt_run wtrm -d "$sel_path";;
+        ("Remove all detached") wt_run wtrm --rm-detached;;
+        ("Prune stale") if wt_has_cmd wtrm; then wtrm --prune-only; else git worktree prune -v; fi;;
         ("Set upstream (origin)")
           local b="${sel_branch}"; local remote="origin"
           if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
@@ -803,14 +722,10 @@ FIRSTRUN
     ctrl-e)
       # Toggle Enter default between open and menu, then re-run hub with same view
       if [[ "$enter_default" == "open" ]]; then
-        local cfg_dir; cfg_dir="$HOME/.config/git-worktrees"; local cfg_file; cfg_file="$cfg_dir/hub"
-        mkdir -p "$cfg_dir" 2>/dev/null || true
-        { printf "%s\n" "ENTER_DEFAULT=menu"; } > "$cfg_file" 2>/dev/null || true
+        wt_set_config WT_ENTER_BEHAVIOR menu 2>/dev/null || true
         WTHUB_ENTER_DEFAULT=menu wt ${include_detached:+--detached} --start list
       else
-        local cfg_dir; cfg_dir="$HOME/.config/git-worktrees"; local cfg_file; cfg_file="$cfg_dir/hub"
-        mkdir -p "$cfg_dir" 2>/dev/null || true
-        { printf "%s\n" "ENTER_DEFAULT=open"; } > "$cfg_file" 2>/dev/null || true
+        wt_set_config WT_ENTER_BEHAVIOR open 2>/dev/null || true
         WTHUB_ENTER_DEFAULT=open wt ${include_detached:+--detached} --start list
       fi
       return $?
@@ -825,15 +740,7 @@ HELP
       ;;
     *)
       # Default fallback: open
-      local detected_app
-      detected_app="$(wt_get_editor 2>/dev/null)" || true
-      if [[ -n "$detected_app" ]]; then
-        typeset -f wt_open_in_android_studio >/dev/null 2>&1 \
-          && wt_open_in_android_studio "$sel_path" "$detected_app" \
-          || open -a "$detected_app" "$sel_path" >/dev/null 2>&1 || true
-      else
-        echo "ℹ️  Worktree is at: $sel_path"
-      fi
+      wt_open_or_show "$sel_path"
       ;;
   esac
 }

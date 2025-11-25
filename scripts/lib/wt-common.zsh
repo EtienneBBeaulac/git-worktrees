@@ -1,5 +1,20 @@
 #!/usr/bin/env zsh
 # wt-common: shared helpers for git-worktrees tools (zsh)
+#
+# GLOBAL STATE DOCUMENTATION:
+# This module uses the following global variables:
+#   - __WT_COMMON_SOURCED: Guard to prevent double-sourcing
+#   - __WT_LIB_DIR: Directory containing library files
+#   - WT_VERSION: Current version string
+#   - WT_CONFIG: Associative array of configuration values
+#   - WT_DEBUG_LEVEL_CACHE: Cached debug level for performance
+#
+# Environment Variables (user-configurable):
+#   - WT_DEBUG: Enable debug output (0/1)
+#   - WT_EDITOR: Override default editor
+#   - WT_FZF_HEIGHT: FZF height (default: 40%)
+#   - WT_FZF_OPTS: Additional FZF options
+#   - WT_FAST: Enable fast mode for status display
 
 emulate -L zsh
 unsetopt xtrace verbose
@@ -7,6 +22,34 @@ typeset -g __WT_COMMON_SOURCED=1
 
 # Version (automatically updated by GitHub Actions on release)
 typeset -g WT_VERSION="1.1.1"
+
+# ============================================================================
+# Global State Accessors (Prefer these over direct global access)
+# ============================================================================
+
+# Get the current version
+# Usage: wt_get_version
+wt_get_version() {
+  printf "%s" "${WT_VERSION:-unknown}"
+}
+
+# Get the library directory
+# Usage: wt_get_lib_dir
+wt_get_lib_dir() {
+  printf "%s" "${__WT_LIB_DIR:-}"
+}
+
+# Get FZF height setting
+# Usage: wt_get_fzf_height
+wt_get_fzf_height() {
+  printf "%s" "${WT_FZF_HEIGHT:-40%}"
+}
+
+# Get additional FZF options
+# Usage: wt_get_fzf_opts
+wt_get_fzf_opts() {
+  printf "%s" "${WT_FZF_OPTS:-}"
+}
 
 # ============================================================================
 # Load enhanced modules (Phase 1: Core Infrastructure)
@@ -23,8 +66,414 @@ __WT_LIB_DIR="${${(%):-%x}:A:h}"
 [[ -f "$__WT_LIB_DIR/wt-discovery.zsh" ]] && source "$__WT_LIB_DIR/wt-discovery.zsh"
 
 # ============================================================================
+# Structured Worktree Data Type
+# ============================================================================
+# Worktrees are represented as tab-delimited strings with the following fields:
+#   branch\tpath\tis_bare\tis_detached\tcommit_sha
+#
+# Access field helpers:
+
+# Parse a worktree line into components
+# Usage: wt_worktree_parse <line> <var_prefix>
+# Sets: ${var_prefix}_branch, ${var_prefix}_path, ${var_prefix}_bare,
+#       ${var_prefix}_detached, ${var_prefix}_sha
+wt_worktree_parse() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local line="$1" prefix="${2:-WT}"
+  local -a parts
+  # Use IFS-based splitting for reliable tab parsing
+  IFS=$'\t' read -rA parts <<< "$line"
+  
+  eval "${prefix}_branch=\"\${parts[1]:-}\""
+  eval "${prefix}_path=\"\${parts[2]:-}\""
+  eval "${prefix}_bare=\"\${parts[3]:-0}\""
+  eval "${prefix}_detached=\"\${parts[4]:-0}\""
+  eval "${prefix}_sha=\"\${parts[5]:-}\""
+}
+
+# Get a specific field from a worktree line
+# Usage: wt_worktree_get <line> <field>
+# Fields: branch, path, bare, detached, sha
+wt_worktree_get() {
+  emulate -L zsh
+  local line="$1" field="$2"
+  local -a parts
+  # Use IFS-based splitting for reliable tab parsing
+  IFS=$'\t' read -rA parts <<< "$line"
+  
+  case "$field" in
+    branch)   printf "%s" "${parts[1]:-}";;
+    path)     printf "%s" "${parts[2]:-}";;
+    bare)     printf "%s" "${parts[3]:-0}";;
+    detached) printf "%s" "${parts[4]:-0}";;
+    sha)      printf "%s" "${parts[5]:-}";;
+    *)        return 1;;
+  esac
+}
+
+# Create a worktree line from components
+# Usage: wt_worktree_create <branch> <path> [bare] [detached] [sha]
+wt_worktree_create() {
+  emulate -L zsh
+  local branch="$1" path="$2" bare="${3:-0}" detached="${4:-0}" sha="${5:-}"
+  printf "%s\t%s\t%s\t%s\t%s" "$branch" "$path" "$bare" "$detached" "$sha"
+}
+
+# Check if worktree is detached
+# Usage: wt_worktree_is_detached <line>
+wt_worktree_is_detached() {
+  emulate -L zsh
+  [[ "$(wt_worktree_get "$1" detached)" == "1" ]]
+}
+
+# Check if worktree is bare repository
+# Usage: wt_worktree_is_bare <line>
+wt_worktree_is_bare() {
+  emulate -L zsh
+  [[ "$(wt_worktree_get "$1" bare)" == "1" ]]
+}
+
+# ============================================================================
+# Git Operation Wrappers (Consistent Abstraction Layer)
+# ============================================================================
+
+# Check if currently inside a git worktree/repository
+# Usage: wt_git_is_repo [directory]
+wt_git_is_repo() {
+  emulate -L zsh
+  local dir="${1:-.}"
+  git -C "$dir" rev-parse --git-dir >/dev/null 2>&1
+}
+
+# Get the git root directory
+# Usage: wt_git_root [directory]
+wt_git_root() {
+  emulate -L zsh
+  local dir="${1:-.}"
+  git -C "$dir" rev-parse --show-toplevel 2>/dev/null
+}
+
+# Get porcelain worktree list output
+# Usage: wt_git_worktree_list_porcelain [directory]
+wt_git_worktree_list_porcelain() {
+  emulate -L zsh
+  local dir="${1:-.}"
+  git -C "$dir" worktree list --porcelain 2>/dev/null
+}
+
+# Check if a branch exists (local)
+# Usage: wt_git_branch_exists <branch_name> [directory]
+wt_git_branch_exists() {
+  emulate -L zsh
+  local branch="$1" dir="${2:-.}"
+  git -C "$dir" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null
+}
+
+# Check if a remote branch exists
+# Usage: wt_git_remote_branch_exists <remote> <branch_name> [directory]
+wt_git_remote_branch_exists() {
+  emulate -L zsh
+  local remote="$1" branch="$2" dir="${3:-.}"
+  git -C "$dir" show-ref --verify --quiet "refs/remotes/$remote/$branch" 2>/dev/null
+}
+
+# Fetch from remote (with error handling)
+# Usage: wt_git_fetch [remote] [directory]
+wt_git_fetch() {
+  emulate -L zsh
+  local remote="${1:-origin}" dir="${2:-.}"
+  git -C "$dir" fetch "$remote" --prune 2>/dev/null
+}
+
+# Add a worktree
+# Usage: wt_git_worktree_add <path> <branch> [base_ref]
+# Returns: 0 on success, 1 on failure
+wt_git_worktree_add() {
+  emulate -L zsh
+  local path="$1" branch="$2" base_ref="${3:-}"
+  if [[ -n "$base_ref" ]]; then
+    git worktree add -b "$branch" "$path" "$base_ref" 2>&1
+  else
+    git worktree add "$path" "$branch" 2>&1
+  fi
+}
+
+# Remove a worktree
+# Usage: wt_git_worktree_remove <path> [--force]
+wt_git_worktree_remove() {
+  emulate -L zsh
+  local path="$1"
+  shift
+  git worktree remove "$path" "$@" 2>&1
+}
+
+# Prune stale worktrees
+# Usage: wt_git_worktree_prune [-v]
+wt_git_worktree_prune() {
+  emulate -L zsh
+  git worktree prune "$@" 2>&1
+}
+
+# Get current branch name
+# Usage: wt_git_current_branch [directory]
+wt_git_current_branch() {
+  emulate -L zsh
+  local dir="${1:-.}"
+  git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null
+}
+
+# Check if branch is fully merged into base
+# Usage: wt_git_is_merged <branch> <base> [directory]
+wt_git_is_merged() {
+  emulate -L zsh
+  local branch="$1" base="$2" dir="${3:-.}"
+  local merge_base branch_sha
+  merge_base="$(git -C "$dir" merge-base "$branch" "$base" 2>/dev/null)" || return 1
+  branch_sha="$(git -C "$dir" rev-parse "$branch" 2>/dev/null)" || return 1
+  [[ "$merge_base" == "$branch_sha" ]]
+}
+
+# ============================================================================
+# UI Layer (Presentation - Separate from Business Logic)
+# ============================================================================
+# These functions handle user interaction and presentation.
+# Business logic should NOT call these directly - use callbacks or return values.
+
+# Display a confirmation prompt
+# Usage: wt_ui_confirm "message" [default]
+# Returns: 0 if yes, 1 if no
+wt_ui_confirm() {
+  emulate -L zsh
+  local msg="$1" default="${2:-n}"
+  local prompt reply
+  
+  if [[ "$default" == "y" ]]; then
+    prompt="[Y/n]"
+  else
+    prompt="[y/N]"
+  fi
+  
+  printf "%s %s " "$msg" "$prompt"
+  read -r reply
+  
+  if [[ -z "$reply" ]]; then
+    reply="$default"
+  fi
+  
+  [[ "${reply:l}" == "y" || "${reply:l}" == "yes" ]]
+}
+
+# Display a selection menu (fallback when FZF not available)
+# Usage: wt_ui_select_menu <prompt> <options...>
+# Returns: Selected option on stdout
+wt_ui_select_menu() {
+  emulate -L zsh
+  local prompt="$1"
+  shift
+  local -a options=("$@")
+  local i choice
+  
+  echo "$prompt"
+  for (( i=1; i <= ${#options[@]}; i++ )); do
+    echo "  $i) ${options[$i]}"
+  done
+  
+  printf "Choice [1-%d]: " "${#options[@]}"
+  read -r choice
+  
+  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
+    printf "%s" "${options[$choice]}"
+  else
+    return 1
+  fi
+}
+
+# Format a worktree for display
+# Usage: wt_ui_format_worktree <branch> <path> [status]
+wt_ui_format_worktree() {
+  emulate -L zsh
+  local branch="$1" path="$2" status="${3:-}"
+  
+  if [[ -n "$status" ]]; then
+    printf "%-30s %s %s" "$branch" "$path" "$status"
+  else
+    printf "%-30s %s" "$branch" "$path"
+  fi
+}
+
+# Show progress spinner (for long operations)
+# Usage: wt_ui_spinner <pid> <message>
+wt_ui_spinner() {
+  emulate -L zsh
+  local pid="$1" msg="$2"
+  local -a chars=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+  local i=0
+  
+  while kill -0 "$pid" 2>/dev/null; do
+    printf "\r%s %s" "${chars[$((i % ${#chars[@]} + 1))]}" "$msg"
+    sleep 0.1
+    ((i++))
+  done
+  printf "\r\033[K"  # Clear line
+}
+
+# ============================================================================
+# Standardized Output Helpers
+# ============================================================================
+
+# Print an error message and optionally return a code
+# Usage: wt_msg_error "message" [exit_code]
+# Note: This is for user-facing messages; wt_error() is for debug logging
+wt_msg_error() {
+  emulate -L zsh
+  local msg="$1"
+  local code="${2:-1}"
+  echo "❌ $msg" >&2
+  return "$code"
+}
+
+# Print a warning message
+# Usage: wt_msg_warn "message"
+wt_msg_warn() {
+  emulate -L zsh
+  echo "⚠️  $1" >&2
+}
+
+# Print a success message
+# Usage: wt_msg_success "message"
+wt_msg_success() {
+  emulate -L zsh
+  echo "✅ $1"
+}
+
+# Print an info message
+# Usage: wt_msg_info "message"
+wt_msg_info() {
+  emulate -L zsh
+  echo "ℹ️  $1"
+}
+
+# Print a status/progress message
+# Usage: wt_msg_status "message"
+wt_msg_status() {
+  emulate -L zsh
+  echo "🚀 $1"
+}
+
+# ============================================================================
+# Extracted/Composable Helper Functions
+# ============================================================================
+
+# Check if FZF is available
+# Usage: wt_has_fzf
+wt_has_fzf() {
+  emulate -L zsh
+  command -v fzf >/dev/null 2>&1
+}
+
+# Select a branch using FZF
+# Usage: wt_select_branch_fzf [prompt] [allow_remote]
+# Returns: Selected branch name on stdout, empty if cancelled
+wt_select_branch_fzf() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local prompt="${1:-Branch: }" allow_remote="${2:-0}"
+  
+  wt_has_fzf || return 1
+  
+  local branches
+  if (( allow_remote )); then
+    branches="$(git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads refs/remotes 2>/dev/null)"
+  else
+    branches="$(git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads 2>/dev/null)"
+  fi
+  
+  [[ -z "$branches" ]] && return 1
+  
+  printf "%s\n" "$branches" | fzf --prompt="$prompt" --height=40% --reverse
+}
+
+# Select from worktree list using FZF
+# Usage: wt_select_worktree_fzf [prompt] [include_detached]
+# Returns: Selected line (branch\tpath) on stdout
+wt_select_worktree_fzf() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local prompt="${1:-Worktree: }" include_detached="${2:-0}"
+  
+  wt_has_fzf || return 1
+  
+  local porcelain selectable
+  porcelain="$(wt_git_worktree_list_porcelain)"
+  selectable="$(wt_parse_worktrees_porcelain "$include_detached" "$porcelain")"
+  
+  [[ -z "$selectable" ]] && return 1
+  
+  printf "%s\n" "$selectable" | fzf --prompt="$prompt" --height=40% --reverse --with-nth=1 --delimiter=$'\t'
+}
+
+# Get the path for a worktree hosting a specific branch
+# Usage: wt_get_worktree_path_for_branch <branch>
+# Returns: Path on stdout, empty if not found
+wt_get_worktree_path_for_branch() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local branch="$1"
+  
+  local porcelain rows
+  porcelain="$(wt_git_worktree_list_porcelain)"
+  rows="$(wt_parse_worktrees_porcelain 0 "$porcelain")"
+  
+  printf "%s\n" "$rows" | awk -F"\t" -v b="$branch" '$1==b{print $2; exit}'
+}
+
+# Parse common flag patterns (used by multiple commands)
+# Sets variables: open_ide, open_app, do_help
+# Usage: wt_parse_common_flags "$@" && shift $PARSED_COUNT
+wt_parse_common_flags() {
+  emulate -L zsh
+  setopt local_options pipefail
+  typeset -g PARSED_COUNT=0
+  
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-open) open_ide=0; ((PARSED_COUNT++)); shift;;
+      --app) open_app="$2"; ((PARSED_COUNT+=2)); shift 2;;
+      --app=*) open_app="${1#--app=}"; ((PARSED_COUNT++)); shift;;
+      -h|--help) do_help=1; ((PARSED_COUNT++)); shift; return 0;;
+      *) return 0;;  # Unknown flag, stop parsing
+    esac
+  done
+}
+
+# ============================================================================
 # Original wt-common functionality
 # ============================================================================
+
+# Check if a wt command is available (as function or in PATH)
+# Usage: wt_has_cmd <cmd_name>
+# Returns: 0 if available, 1 if not
+wt_has_cmd() {
+  emulate -L zsh
+  local cmd="$1"
+  typeset -f "$cmd" >/dev/null 2>&1 || command -v "$cmd" >/dev/null 2>&1
+}
+
+# Run a wt command or show error if unavailable
+# Usage: wt_run <cmd_name> [args...]
+# Example: wt_run wtnew --name foo
+wt_run() {
+  emulate -L zsh
+  local cmd="$1"
+  shift
+  if wt_has_cmd "$cmd"; then
+    "$cmd" "$@"
+  else
+    echo "❌ $cmd not available" >&2
+    return 1
+  fi
+}
 
 # Shorten a ref to a branch short name when possible
 wt_short_ref() {
@@ -97,33 +546,90 @@ wt_parse_worktrees_table() {
   ' <<< "$porcelain_text"
 }
 
-# Open a directory in Android Studio (robust macOS chain)
-wt_open_in_android_studio() {
+# ============================================================================
+# Editor/IDE Opening (Single Source of Truth)
+# ============================================================================
+
+# Open a directory in the specified editor/IDE
+# Usage: wt_open_in_editor <directory> [app_name]
+# This is the ONLY function that should handle editor opening logic.
+wt_open_in_editor() {
   emulate -L zsh
   setopt local_options pipefail
-  local dir="$1" app_name="${2:-Android Studio}"
-  # Test/override: prefer xdg-open when requested
+  local dir="$1"
+  local app_name="${2:-}"
+  
+  # If no app specified, try to detect
+  [[ -z "$app_name" ]] && app_name="$(wt_get_editor 2>/dev/null)" || true
+  
+  # If still no app (user chose "none"), just return
+  [[ -z "$app_name" || "$app_name" == "none" ]] && return 0
+  
+  # Test/override: prefer xdg-open when requested (for testing)
   if [[ -n ${WT_PREFER_XDG_OPEN:-} ]] && command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$dir" >/dev/null 2>&1 || true
+    xdg-open "$dir" >/dev/null 2>&1
     return 0
   fi
-  # Only use 'studio' command if app_name is actually Android Studio
+  
+  # Android Studio: use 'studio' CLI if available
   if [[ "$app_name" == "Android Studio" ]] && command -v studio >/dev/null 2>&1; then
     studio "$dir" >/dev/null 2>&1 || true
+    return 0
+  fi
+  
+  # Determine what to open (project file detection)
+  local target="$dir"
+  if [[ -d "$dir/.idea" ]]; then
+    target="$dir/.idea"
+  elif [[ -f "$dir/settings.gradle.kts" ]]; then
+    target="$dir/settings.gradle.kts"
+  elif [[ -f "$dir/settings.gradle" ]]; then
+    target="$dir/settings.gradle"
+  elif [[ -f "$dir/build.gradle.kts" ]]; then
+    target="$dir/build.gradle.kts"
+  elif [[ -f "$dir/build.gradle" ]]; then
+    target="$dir/build.gradle"
+  fi
+  
+  # Open with appropriate command
+  if command -v open >/dev/null 2>&1; then
+    # macOS
+    open -a "$app_name" "$target" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then
+    # Linux
+    xdg-open "$target" >/dev/null 2>&1 || true
+  fi
+}
+
+# Legacy alias for backward compatibility
+wt_open_in_android_studio() {
+  wt_open_in_editor "$@"
+}
+
+# Convenience wrapper: opens worktree in editor or shows path if no editor configured
+# Usage: wt_open_or_show [-v] <directory> [app_name]
+# Options:
+#   -v  Verbose mode: print "Opening in..." message
+wt_open_or_show() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local verbose=0
+  
+  if [[ "$1" == "-v" ]]; then
+    verbose=1
+    shift
+  fi
+  
+  local dir="$1"
+  local app="${2:-}"
+  
+  [[ -z "$app" ]] && app="$(wt_get_editor 2>/dev/null)" || true
+  
+  if [[ -n "$app" && "$app" != "none" ]]; then
+    (( verbose )) && echo "🚀  Opening in ${app}…"
+    wt_open_in_editor "$dir" "$app"
   else
-    if [[ -d "$dir/.idea" ]]; then
-      { open -a "$app_name" "$dir/.idea" >/dev/null 2>&1 || command -v xdg-open >/dev/null 2>&1 && xdg-open "$dir/.idea" >/dev/null 2>&1 || true; } || true
-    elif [[ -f "$dir/settings.gradle" || -f "$dir/settings.gradle.kts" ]]; then
-      local sg="$dir/settings.gradle"
-      [[ -f "$dir/settings.gradle.kts" ]] && sg="$dir/settings.gradle.kts"
-      { open -a "$app_name" "$sg" >/dev/null 2>&1 || command -v xdg-open >/dev/null 2>&1 && xdg-open "$sg" >/dev/null 2>&1 || true; } || true
-    elif [[ -f "$dir/build.gradle" || -f "$dir/build.gradle.kts" ]]; then
-      local bg="$dir/build.gradle"
-      [[ -f "$dir/build.gradle.kts" ]] && bg="$dir/build.gradle.kts"
-      { open -a "$app_name" "$bg" >/dev/null 2>&1 || command -v xdg-open >/dev/null 2>&1 && xdg-open "$bg" >/dev/null 2>&1 || true; } || true
-    else
-      { open -a "$app_name" "$dir" >/dev/null 2>&1 || command -v xdg-open >/dev/null 2>&1 && xdg-open "$dir" >/dev/null 2>&1 || true; } || true
-    fi
+    echo "ℹ️  Worktree is at: $dir"
   fi
 }
 
@@ -276,6 +782,30 @@ wt_get_config() {
     printf "%s" "${WT_CONFIG[$key]}"
   else
     printf "%s" "$default_value"
+  fi
+}
+
+# Set a config value in ~/.config/git-worktrees/config
+# Usage: wt_set_config KEY VALUE
+wt_set_config() {
+  emulate -L zsh
+  setopt local_options pipefail
+  local key="$1" value="$2"
+  local cfg_dir="$HOME/.config/git-worktrees"
+  local cfg_file="$cfg_dir/config"
+  
+  mkdir -p "$cfg_dir" 2>/dev/null || true
+  
+  # Update in-memory config
+  WT_CONFIG[$key]="$value"
+  
+  # Update or append to file
+  if [[ -f "$cfg_file" ]] && grep -q "^${key}=" "$cfg_file" 2>/dev/null; then
+    # Key exists - update it (using portable sed -i)
+    wt_sed_i "s|^${key}=.*|${key}=${value}|" "$cfg_file"
+  else
+    # Key doesn't exist - append it
+    echo "${key}=${value}" >> "$cfg_file"
   fi
 }
 
