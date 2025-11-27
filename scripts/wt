@@ -181,21 +181,18 @@ TUTORIAL
         local action="${1:-show}"
         case "$action" in
           init)
-            # Issue #4 fix - wt_init_config is always available
             wt_init_config
             ;;
           edit)
-            local config_file="${HOME}/.config/git-worktrees/config"
+            local config_file="$(wt_config_file)"
             if [[ ! -f "$config_file" ]]; then
               echo "⚠️  Config file doesn't exist. Creating it..."
-              # Issue #4 fix - wt_init_config is always available
               wt_init_config
             fi
             local editor="${EDITOR:-${VISUAL:-vim}}"
             "$editor" "$config_file"
             ;;
           set)
-            local config_file="${HOME}/.config/git-worktrees/config"
             local key="$2"
             local value="$3"
             if [[ -z "$key" || -z "$value" ]]; then
@@ -208,22 +205,18 @@ TUTORIAL
               return 1
             fi
             
-            # Create config if missing (Issue #4 fix - wt_init_config always available)
+            # Create config if missing
+            local config_file="$(wt_config_file)"
             if [[ ! -f "$config_file" ]]; then
               wt_init_config >/dev/null 2>&1
             fi
             
-            # Update or append the value
-            if grep -q "^${key}=" "$config_file" 2>/dev/null; then
-              wt_sed_i "s|^${key}=.*|${key}=${value}|" "$config_file"
-              echo "✅ Updated: ${key}=${value}"
-            else
-              echo "${key}=${value}" >> "$config_file"
-              echo "✅ Added: ${key}=${value}"
-            fi
+            # Use wt_set_config which handles special characters safely
+            wt_set_config "$key" "$value"
+            echo "✅ Set: ${key}=${value}"
             ;;
           get)
-            local config_file="${HOME}/.config/git-worktrees/config"
+            local config_file="$(wt_config_file)"
             local key="$2"
             if [[ -z "$key" ]]; then
               echo "Usage: wt config get <key>"
@@ -247,7 +240,7 @@ TUTORIAL
             fi
             ;;
           show|path)
-            local config_file="${HOME}/.config/git-worktrees/config"
+            local config_file="$(wt_config_file)"
             if [[ -f "$config_file" ]]; then
               echo "Config file: $config_file"
               echo ""
@@ -372,11 +365,37 @@ HELP
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --start)
-        start_mode="$2"; shift 2;;
+        # Check if next arg looks like a flag (missing value)
+        if [[ -z "$2" || "$2" == -* ]]; then
+          wt_msg_warn "--start requires a value (list|new), using 'list'"
+          start_mode="list"
+          shift
+        elif [[ "$2" != "list" && "$2" != "new" ]]; then
+          wt_msg_warn "Invalid --start value '$2', using 'list'"
+          start_mode="list"
+          shift 2
+        else
+          start_mode="$2"
+          shift 2
+        fi
+        ;;
       --detached)
         include_detached=1; shift;;
       --enter-default)
-        enter_default="$2"; shift 2;;
+        # Check if next arg looks like a flag (missing value)
+        if [[ -z "$2" || "$2" == -* ]]; then
+          wt_msg_warn "--enter-default requires a value (open|menu), using 'open'"
+          enter_default="open"
+          shift
+        elif [[ "$2" != "open" && "$2" != "menu" ]]; then
+          wt_msg_warn "Invalid --enter-default value '$2', using 'open'"
+          enter_default="open"
+          shift 2
+        else
+          enter_default="$2"
+          shift 2
+        fi
+        ;;
       -v|--version)
         echo "git-worktrees wt v${WT_VERSION:-unknown}"
         return 0;;
@@ -415,12 +434,11 @@ USAGE
   done
 
   if ! wt_git_is_repo; then
-    # Issue #4 fix - wt_error_not_git_repo always available (stub or implementation)
     wt_error_not_git_repo
     return 1
   fi
   
-  # Use centralized FZF detection (Issue #3 fix)
+  # Use centralized FZF detection
   if ! wt_has_fzf; then
     FZF_MISSING=1
     wt_error_fzf_missing 2>/dev/null || true
@@ -572,13 +590,27 @@ FIRSTRUN
   case "${key:-enter}" in
     enter|ctrl-o)
       if [[ "$enter_default" == "menu" ]]; then
-        # Open actions menu instead of opening directly
+        # Open actions menu instead of opening directly (same options as Ctrl-A)
         local outa
-        outa="$(printf "%s\n" "Open" "Show path" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
+        outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Change editor" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
           | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
         case "$outa" in
           ("Open") wt_open_or_show "$sel_path";;
           ("Show path") echo "$sel_path";;
+          ("Copy path")
+            if command -v pbcopy >/dev/null 2>&1; then
+              printf "%s" "$sel_path" | pbcopy && echo "📋 Copied: $sel_path"
+            else
+              echo "$sel_path"
+            fi;;
+          ("Open in terminal")
+            local term_app="${WT_TERMINAL_APP:-iTerm}"
+            open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || wt_msg_error "Could not open terminal";;
+          ("Print cd command")
+            echo "$(wt_cd_command "$sel_path")";;
+          ("Change editor")
+            wt_change_editor_interactive || return 1
+            ;;
           ("Remove") wt_run wtrm -d "$sel_path";;
           ("Remove all detached") wt_run wtrm --rm-detached;;
           ("Prune stale") if wt_has_cmd wtrm; then wtrm --prune-only; else git worktree prune -v; fi;;
@@ -625,10 +657,10 @@ FIRSTRUN
       ;;
     ctrl-a)
       # Simple actions menu
-      local act outa
+      local outa
       outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Change editor" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
         | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
-        case "$outa" in
+      case "$outa" in
         ("Open") wt_open_or_show "$sel_path";;
         ("Show path") echo "$sel_path";;
         ("Copy path")
@@ -641,64 +673,9 @@ FIRSTRUN
           local term_app="${WT_TERMINAL_APP:-iTerm}"
           open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || wt_msg_error "Could not open terminal";;
         ("Print cd command")
-          echo "cd '$sel_path'";;
+          echo "$(wt_cd_command "$sel_path")";;
         ("Change editor")
-          echo ""
-          echo "📂 Choose your default editor:"
-          echo "  1) Android Studio"
-          echo "  2) Visual Studio Code"
-          echo "  3) Cursor"
-          echo "  4) IntelliJ IDEA"
-          echo "  5) PyCharm"
-          echo "  6) WebStorm"
-          echo "  7) Sublime Text"
-          echo "  8) vim"
-          echo "  9) Don't auto-open (show path only)"
-          echo ""
-          printf "Choice [1-9]: "
-          local choice
-          read -r choice
-          
-          local selected=""
-          case "$choice" in
-            1) selected="Android Studio" ;;
-            2) selected="Visual Studio Code" ;;
-            3) selected="Cursor" ;;
-            4) selected="IntelliJ IDEA" ;;
-            5) selected="PyCharm" ;;
-            6) selected="WebStorm" ;;
-            7) selected="Sublime Text" ;;
-            8) selected="vim" ;;
-            9) selected="none" ;;
-            *) 
-              echo "⚠️  Invalid choice"
-              return 1
-              ;;
-          esac
-          
-          # Save to config
-          local config_file="${HOME}/.config/git-worktrees/config"
-          mkdir -p "$(dirname "$config_file")"
-          if [[ ! -f "$config_file" ]]; then
-            # Issue #4 fix - wt_init_config always available
-            wt_init_config >/dev/null 2>&1
-          fi
-          
-          if [[ -f "$config_file" ]]; then
-            if grep -q "^editor=" "$config_file" 2>/dev/null; then
-              wt_sed_i "s|^editor=.*|editor=${selected}|" "$config_file"
-            else
-              echo "editor=${selected}" >> "$config_file"
-            fi
-          else
-            echo "editor=${selected}" > "$config_file"
-          fi
-          
-          if [[ "$selected" == "none" ]]; then
-            echo "✅ Configured: Show path only (no auto-open)"
-          else
-            echo "✅ Saved: $selected"
-          fi
+          wt_change_editor_interactive || return 1
           ;;
         ("Remove") wt_run wtrm -d "$sel_path";;
         ("Remove all detached") wt_run wtrm --rm-detached;;

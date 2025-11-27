@@ -295,7 +295,7 @@ wt_remote_branch_exists() {
 # Usage: wt_worktree_exists <path>
 wt_worktree_exists() {
   local path="$1"
-  # Issue #2 fix - use wrapper function (note: wt_git_worktree_list_porcelain may not be loaded yet)
+  # Note: wt_git_worktree_list_porcelain may not be loaded yet, use direct git call
   git worktree list --porcelain 2>/dev/null | grep -q "^worktree $(cd "$path" 2>/dev/null && pwd)$"
 }
 
@@ -303,7 +303,7 @@ wt_worktree_exists() {
 # Usage: wt_branch_checked_out <branch>
 wt_branch_checked_out() {
   local branch="$1"
-  # Issue #2 fix - keep direct call since wt-common.zsh may not be loaded yet
+  # Note: wt-common.zsh may not be loaded yet, use direct git call
   git worktree list --porcelain 2>/dev/null | grep -q "^branch refs/heads/$branch$"
 }
 

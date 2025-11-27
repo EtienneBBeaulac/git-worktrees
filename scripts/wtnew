@@ -20,24 +20,12 @@ wtnew() {
 
   # helpers are sourced at load time
   
-  # Track if transaction was started (for cleanup on early returns)
-  local _wtnew_transaction_active=0
-  
-  # Enable error recovery features (transaction log for rollback)
+  # Transaction: always commit on exit (records what happened for debugging)
+  # Plain 'return' works everywhere - no special handling needed
   if wt_recovery_enabled 2>/dev/null; then
     wt_transaction_begin
-    _wtnew_transaction_active=1
-    trap 'wt_transaction_rollback 2>/dev/null || true' EXIT INT TERM
+    trap 'wt_transaction_commit 2>/dev/null || true' EXIT INT TERM
   fi
-  
-  # Helper to clean up transaction trap on early returns (before any operations)
-  _wtnew_early_return() {
-    if (( _wtnew_transaction_active )); then
-      trap - EXIT INT TERM
-      wt_transaction_commit 2>/dev/null || true
-    fi
-    return "$1"
-  }
 
   local new_branch base_ref repo default_dir wt_dir
   local open_ide=1 open_app=""
@@ -62,7 +50,7 @@ wtnew() {
       --inside-ok) inside_ok=1; shift;;
       -v|--version)
         echo "git-worktrees wtnew v${WT_VERSION:-unknown}"
-        _wtnew_early_return 0; return $?;;
+        return 0;;
       -h|--help)
         cat <<'USAGE'
 Usage: wtnew [options]
@@ -82,7 +70,7 @@ Notes:
 Debug:
   - Set WTNEW_DEBUG=1 to print branch/base lists and counts.
 USAGE
-        _wtnew_early_return 0; return $?;;
+        return 0;;
       *) echo "Unknown option: $1"; return 2;;
     esac
   done
@@ -99,30 +87,22 @@ USAGE
   # -------- sanity checks --------
   if ! wt_git_is_repo; then
     wt_msg_error "Not a git repo"
-    # Stub functions allow direct call (Issue #4 fix)
     echo ""
     echo "💡 Hint: Run this command from inside a git repository"
     echo "   Or initialize one with: git init"
-    _wtnew_early_return 1; return $?
+    return 1
   fi
-  # Use centralized FZF detection (Issue #3 fix)
+  # Use centralized FZF detection
   wt_has_fzf || FZF_MISSING=1
 
-  echo "🔄  Fetching remotes…"
-  if ! git fetch --all --prune --tags --quiet 2>/dev/null; then
-    # Network failure - offer recovery options (Issue #4 fix - stubs allow direct call)
-    local fetch_output="Network fetch failed"
-    local error_type=$(wt_diagnose_error "git fetch" "$fetch_output" 1)
-    echo "⚠️  $(wt_error_message "$error_type")"
-    echo "   Continuing with cached refs..."
-  fi
+  wt_fetch_remotes_safe
 
   # Validate explicit remote if provided
   if [[ -n ${explicit_remote:-} ]] && ! git remote | grep -Fxq "$explicit_remote"; then
     wt_msg_error "Unknown remote: $explicit_remote"
     echo "   Available remotes: $(git remote | tr '\n' ' ')"
     
-    # Offer fuzzy match suggestion (Issue #4 fix - stubs allow direct call)
+    # Offer fuzzy match suggestion
     local all_remotes=$(git remote)
     local closest=$(echo "$all_remotes" | grep -i "$explicit_remote" | head -1)
     if [[ -n "$closest" ]]; then
@@ -134,10 +114,10 @@ USAGE
         explicit_remote="$closest"
         echo "   Using: $explicit_remote"
       else
-        _wtnew_early_return 1; return $?
+        return 1
       fi
     else
-      _wtnew_early_return 1; return $?
+      return 1
     fi
   fi
 
@@ -158,9 +138,9 @@ USAGE
         echo "DBG branches count: $(printf "%s\n" "$all_branches" | sed '/^$/d' | wc -l)" >&2
         printf "%s\n" "$all_branches" >&2
       fi
-      [[ -z "$all_branches" ]] && { wt_msg_error "No branches found. Try: git fetch --all --prune --tags"; _wtnew_early_return 1; return $?; }
+      [[ -z "$all_branches" ]] && { wt_msg_error "No branches found. Try: git fetch --all --prune --tags"; return 1; }
 
-      # Show discovery hint (Issue #4 fix - stubs allow direct call)
+      # Show discovery hint
       wt_show_contextual_help branch_selection
 
       out="$(printf "%s\n" "$all_branches" \
@@ -179,7 +159,7 @@ USAGE
 
       # If user cancelled (Esc/Ctrl-C), fzf returns non-zero and no output
       if (( fzf_status != 0 )) && [[ -z "$query" && -z "$choice" ]]; then
-        wt_msg_error "No branch chosen"; _wtnew_early_return 1; return $?
+        wt_msg_error "No branch chosen"; return 1
       fi
 
       if [[ -n "$choice" && "$choice" != "$query" ]]; then
@@ -193,7 +173,7 @@ USAGE
       printf "🆕  Branch name (new or existing): "; read -r new_branch
     fi
   fi
-  [[ -z $new_branch ]] && { wt_msg_error "Branch name required"; _wtnew_early_return 1; return $?; }
+  [[ -z $new_branch ]] && { wt_msg_error "Branch name required"; return 1; }
 
   # -------- normalize selection into remote + short branch --------
   local sel="$new_branch" remote_name="" short_branch=""
@@ -211,10 +191,10 @@ USAGE
   # Strict validation of local branch name (no mutation/sanitization)
   # Allow: alphanumeric, slashes, underscores, hyphens, and dots (for versions like release/1.0.0)
   if ! [[ "$new_branch" =~ ^[A-Za-z0-9/_.\-]+$ ]]; then
-    wt_msg_error "Invalid branch name: $new_branch"; _wtnew_early_return 1; return $?
+    wt_msg_error "Invalid branch name: $new_branch"; return 1
   fi
   git check-ref-format --branch "$new_branch" \
-    || { wt_msg_error "Invalid branch name: $new_branch"; _wtnew_early_return 1; return $?; }
+    || { wt_msg_error "Invalid branch name: $new_branch"; return 1; }
 
   # -------- existence checks across local + any remote --------
   local local_exists=0 remote_exists=0 remote_found=""
@@ -230,7 +210,7 @@ USAGE
   # -------- base ref selection (only for brand-new branches) --------
   if (( !local_exists && !remote_exists )); then
     if [[ -z ${base_ref:-} ]]; then
-      # Use centralized default branch detection (Issue #6 fix)
+      # Use centralized default branch detection
       base_ref="$(wt_find_default_branch)" || true
     fi
     if [[ -z ${base_ref:-} ]]; then
@@ -246,7 +226,7 @@ USAGE
         printf "⛓  Base ref (or 'q' to cancel): "; read -r base_ref
         if [[ -z "$base_ref" || "$base_ref" == "q" || "$base_ref" == "Q" ]]; then
           wt_msg_error "Cancelled"
-          _wtnew_early_return 1; return $?
+          return 1
         fi
       else
         base_ref="$(printf "%s\n" "$branch_list" \
@@ -259,13 +239,12 @@ USAGE
         [[ -n "$base_ref" ]] && echo "✓ Base: $base_ref"
       fi
     fi
-    [[ -z $base_ref ]] && { wt_msg_error "No base ref selected"; _wtnew_early_return 1; return $?; }
+    [[ -z $base_ref ]] && { wt_msg_error "No base ref selected"; return 1; }
     git rev-parse --verify -q "$base_ref" >/dev/null \
-      || { wt_msg_error "Unknown base ref: $base_ref"; _wtnew_early_return 1; return $?; }
+      || { wt_msg_error "Unknown base ref: $base_ref"; return 1; }
   fi
 
   # -------- reuse existing worktree for this branch if already checked out --------
-  # Issue #2 fix - use wrapper function
   local existing_wt_dir
   existing_wt_dir="$(wt_git_worktree_list_porcelain | awk -v b="$new_branch" '
     /^worktree /{d=$2}
@@ -283,7 +262,6 @@ USAGE
   if (( skip_create == 0 && prefer_reuse == 1 )); then
     # Exclude repo root; find clean, non-busy slots
     local repo_root_reuse; repo_root_reuse="$(git rev-parse --show-toplevel)"
-    # Issue #2 fix - use wrapper function
     local slots=""; local block
     block="$(wt_git_worktree_list_porcelain)"
     local sdir sbr sclean sbusy out lines=""
@@ -330,7 +308,7 @@ USAGE
             | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
                   --prompt="♻️  Reuse slot for $new_branch: " \
                   --preview '
-                      path=$(echo {} | awk "{print $NF}")
+                      path=$(echo {} | awk "{print \$NF}")
                       if [[ -d "$path" ]]; then
                         printf "Path: %s\n\n" "$path"
                         git -C "$path" status -sb --untracked-files=all 2>/dev/null
@@ -367,14 +345,14 @@ USAGE
   if (( skip_create == 0 && reuse_slot == 0 )) && (( inside_ok == 0 )) && [[ -z ${WTNEW_INSIDE_OK:-} ]] && [[ "$wt_dir_abs" == "$repo_root_abs" || "$wt_dir_abs" == $repo_root_abs/* ]]; then
     wt_msg_error "Worktree path cannot be inside the current repository: $wt_dir"
     echo "   Pick a path outside, e.g.: $default_dir"
-    _wtnew_early_return 1; return $?
+    return 1
   fi
 
   if (( skip_create == 0 && reuse_slot == 0 )); then
     if [[ -e "$wt_dir_abs" ]]; then
       wt_msg_error "Path already exists: $wt_dir"
       
-      # Offer recovery options (Issue #4 fix - stubs allow direct call)
+      # Offer recovery options
       wt_offer_recovery already_exists "$wt_dir"
       local recovery_choice=$?
       if (( recovery_choice == 4 )); then
@@ -383,22 +361,20 @@ USAGE
         wt_dir_abs="${wt_dir:A}"
       elif (( recovery_choice == 6 )); then
         # Reuse existing (if it's a valid worktree)
-        # Issue #2 fix - use wrapper function
         if wt_git_worktree_list_porcelain | awk '/^worktree /{print $2}' | grep -Fxq "$wt_dir_abs"; then
           echo "♻️  Reusing existing worktree"
           skip_create=1
         else
           wt_msg_error "Path exists but is not a worktree"
-          _wtnew_early_return 1; return $?
+          return 1
         fi
       else
-        _wtnew_early_return 1; return $?
+        return 1
       fi
     fi
     
-    # Issue #2 fix - use wrapper function
     if (( skip_create == 0 )) && wt_git_worktree_list_porcelain | awk '/^worktree /{print $2}' | grep -Fxq "$wt_dir_abs"; then
-      wt_msg_error "Worktree already registered at: $wt_dir"; _wtnew_early_return 1; return $?
+      wt_msg_error "Worktree already registered at: $wt_dir"; return 1
     fi
   fi
 
@@ -438,7 +414,7 @@ USAGE
   else
     echo "➕  Creating worktree…"
     
-    # Record transaction for potential rollback (Issue #4 fix - stubs allow direct call)
+    # Record transaction for potential rollback
     wt_transaction_record "dir_create" "$wt_dir"
     
     local add_failed=0
@@ -455,7 +431,7 @@ USAGE
       wt_msg_error "worktree add failed"
       echo "$add_output" | grep -v "^$" | head -3
       
-      # Diagnose and offer recovery (Issue #4 fix - stubs allow direct call)
+      # Diagnose and offer recovery
       local error_type=$(wt_diagnose_error "git worktree add" "$add_output" 1)
       echo ""
       echo "💡 $(wt_error_message "$error_type")"
@@ -475,7 +451,7 @@ USAGE
       return 1
     fi
     
-    # Record successful worktree creation (Issue #4 fix - stubs allow direct call)
+    # Record successful worktree creation
     wt_transaction_record "worktree_add" "$wt_dir"
   fi
 
@@ -509,7 +485,16 @@ USAGE
     # If no remote branch exists and --push requested, create it and set upstream
     if (( do_push )) && [[ -n "$selected_remote" ]]; then
       echo "🌐  Pushing to $selected_remote and setting upstream…"
-      (cd "$wt_dir" && git push -u "$selected_remote" "$new_branch" >/dev/null 2>&1 || true)
+      local push_output
+      if push_output="$(cd "$wt_dir" && git push -u "$selected_remote" "$new_branch" 2>&1)"; then
+        echo "✅ Pushed to $selected_remote/$new_branch"
+      else
+        wt_msg_warn "Push failed (worktree created successfully)"
+        echo "   $push_output" | head -3
+        echo ""
+        echo "💡 You can push later with:"
+        echo "   $(wt_cd_command "$wt_dir") && $(wt_shell_command git push -u "$selected_remote" "$new_branch")"
+      fi
     fi
   fi
 
@@ -540,9 +525,5 @@ USAGE
   else
     echo "✅  Worktree ready at: $wt_dir"
   fi
-  
-  # Commit transaction on success (no rollback needed)
-  # Issue #4 fix - stubs allow direct call
-  wt_transaction_commit
-  trap - EXIT INT TERM  # Remove rollback trap
+  # Trap will auto-commit on exit
 }

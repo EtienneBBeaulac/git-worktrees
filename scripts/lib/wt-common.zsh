@@ -73,7 +73,7 @@ wt_get_fzf_opts() {
 }
 
 # ============================================================================
-# Stub Functions for Optional Modules (Issue #4 fix)
+# Stub Functions for Optional Modules
 # ============================================================================
 # These provide no-op defaults so callers don't need `typeset -f` checks.
 # The actual module implementations override these when loaded.
@@ -315,7 +315,7 @@ wt_find_default_branch() {
   return 1
 }
 
-# Check if worktree has uncommitted changes (Issue #8 fix)
+# Check if worktree has uncommitted changes
 # Usage: wt_is_worktree_dirty <directory>
 # Returns: 0 if dirty (has changes), 1 if clean
 wt_is_worktree_dirty() {
@@ -998,6 +998,205 @@ wt_sed_i() {
 }
 
 # ----------------------
+# Boolean/Flag Parsing Utilities
+# ----------------------
+
+# Parse a boolean environment variable or value
+# Usage: wt_parse_bool "value" [default]
+# Returns: 0 (true) or 1 (false)
+# Recognizes: true/false, yes/no, on/off, 1/0 (case-insensitive)
+wt_parse_bool() {
+  emulate -L zsh
+  local val="${1:-}" default="${2:-false}"
+  
+  # Empty value uses default
+  [[ -z "$val" ]] && val="$default"
+  
+  case "${val:l}" in
+    1|true|yes|on|enabled) return 0 ;;
+    0|false|no|off|disabled|"") return 1 ;;
+    *) return 1 ;;  # Unknown values treated as false
+  esac
+}
+
+# Validate a value is one of allowed options
+# Usage: wt_validate_option "value" "opt1" "opt2" ...
+# Returns: 0 if valid, 1 if invalid (prints error)
+wt_validate_option() {
+  emulate -L zsh
+  local val="$1"
+  shift
+  local opt
+  for opt in "$@"; do
+    [[ "$val" == "$opt" ]] && return 0
+  done
+  echo "Invalid value: '$val'. Expected one of: $*" >&2
+  return 1
+}
+
+# ----------------------
+# Git Operations with Timeout
+# ----------------------
+
+# Run git fetch with timeout to prevent hanging on slow networks
+# Usage: wt_git_fetch_with_timeout [timeout_seconds]
+# Returns: 0 on success, 1 on failure/timeout
+# Sets: WT_FETCH_STATUS with result message
+wt_git_fetch_with_timeout() {
+  emulate -L zsh
+  local timeout_secs="${1:-${WT_FETCH_TIMEOUT:-30}}"
+  
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$timeout_secs" git fetch --all --prune --tags --quiet 2>/dev/null
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$timeout_secs" git fetch --all --prune --tags --quiet 2>/dev/null
+  else
+    # No timeout command available, run without timeout
+    git fetch --all --prune --tags --quiet 2>/dev/null
+  fi
+}
+
+# Fetch remotes with user feedback and graceful failure
+# Usage: wt_fetch_remotes_safe
+# Always succeeds (continues with cached refs on failure)
+wt_fetch_remotes_safe() {
+  emulate -L zsh
+  echo "🔄  Fetching remotes…"
+  if ! wt_git_fetch_with_timeout; then
+    echo "⚠️  Fetch failed or timed out, continuing with cached refs..."
+  fi
+}
+
+# ----------------------
+# Editor Selection Menu
+# ----------------------
+
+# Display editor selection menu and return choice
+# Usage: selected=$(wt_editor_selection_menu)
+# Returns: Editor name or "none" on stdout, empty on cancel
+# Note: Menu prompts go to stderr, only result goes to stdout
+wt_editor_selection_menu() {
+  emulate -L zsh
+  echo "" >&2
+  echo "📂 Choose your default editor:" >&2
+  echo "  1) Android Studio" >&2
+  echo "  2) Visual Studio Code" >&2
+  echo "  3) Cursor" >&2
+  echo "  4) IntelliJ IDEA" >&2
+  echo "  5) PyCharm" >&2
+  echo "  6) WebStorm" >&2
+  echo "  7) Sublime Text" >&2
+  echo "  8) vim" >&2
+  echo "  9) Don't auto-open (show path only)" >&2
+  echo "" >&2
+  printf "Choice [1-9]: " >&2
+  
+  local choice
+  read -r choice
+  
+  case "$choice" in
+    1) echo "Android Studio" ;;
+    2) echo "Visual Studio Code" ;;
+    3) echo "Cursor" ;;
+    4) echo "IntelliJ IDEA" ;;
+    5) echo "PyCharm" ;;
+    6) echo "WebStorm" ;;
+    7) echo "Sublime Text" ;;
+    8) echo "vim" ;;
+    9) echo "none" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prompt user to select editor and save to config
+# Usage: wt_change_editor_interactive
+# Returns: 0 on success, 1 on cancel/invalid
+wt_change_editor_interactive() {
+  emulate -L zsh
+  local selected
+  selected="$(wt_editor_selection_menu)"
+  
+  if [[ -z "$selected" ]]; then
+    echo "⚠️  Invalid choice"
+    return 1
+  fi
+  
+  # Save to config
+  wt_set_config "editor" "$selected"
+  
+  if [[ "$selected" == "none" ]]; then
+    echo "✅ Configured: Show path only (no auto-open)"
+  else
+    echo "✅ Saved: $selected"
+  fi
+  return 0
+}
+
+# ----------------------
+# Shell Quoting Utilities
+# ----------------------
+# These functions help create shell-safe strings for display and copy-paste.
+
+# Escape a string for use inside single quotes
+# Replaces each ' with '\'' (end quote, escaped quote, start quote)
+# Usage: wt_escape_single_quotes "string with 'quotes'"
+# Output: string with '\''quotes'\''
+wt_escape_single_quotes() {
+  emulate -L zsh
+  local str="$1"
+  # Use explicit replacement to avoid zsh escaping issues
+  # Each ' becomes '\'' (4 chars: apostrophe, backslash, apostrophe, apostrophe)
+  local result=""
+  local i char
+  for (( i=1; i <= ${#str}; i++ )); do
+    char="${str[$i]}"
+    if [[ "$char" == "'" ]]; then
+      result+="'\\''";
+    else
+      result+="$char"
+    fi
+  done
+  printf "%s" "$result"
+}
+
+# Quote a string for safe shell use (single-quoted with escaping)
+# Usage: wt_shell_quote "/path/with 'special' chars"
+# Output: '/path/with '\''special'\'' chars'
+wt_shell_quote() {
+  emulate -L zsh
+  local str="$1"
+  printf "'%s'" "$(wt_escape_single_quotes "$str")"
+}
+
+# Build a safe cd command for display/copy-paste
+# Usage: wt_cd_command "/path/to/dir"
+# Output: cd '/path/to/dir'  (with proper escaping)
+wt_cd_command() {
+  emulate -L zsh
+  local dir="$1"
+  printf "cd %s" "$(wt_shell_quote "$dir")"
+}
+
+# Build a safe shell command string with multiple arguments
+# Usage: wt_shell_command "git" "push" "-u" "origin" "my branch"
+# Output: git push -u origin 'my branch'
+# Note: Only quotes arguments that need it (contain spaces/special chars)
+wt_shell_command() {
+  emulate -L zsh
+  local cmd="" arg
+  for arg in "$@"; do
+    [[ -n "$cmd" ]] && cmd+=" "
+    # Quote if contains spaces, quotes, or shell special chars
+    if [[ "$arg" =~ [[:space:]\'\"\$\`\\] ]]; then
+      cmd+="$(wt_shell_quote "$arg")"
+    else
+      cmd+="$arg"
+    fi
+  done
+  printf "%s" "$cmd"
+}
+
+# ----------------------
 # Unified logging helpers
 # ----------------------
 typeset -g WT_DEBUG_LEVEL_CACHE
@@ -1230,8 +1429,8 @@ wt_first_run_editor_setup() {
   esac
   
   # Save to config
-  local config_dir="${HOME}/.config/git-worktrees"
-  local config_file="${config_dir}/config"
+  local config_dir="$(wt_config_dir)"
+  local config_file="$(wt_config_file)"
   mkdir -p "$config_dir"
   
   if [[ "$selected" == "auto" ]]; then
@@ -1282,7 +1481,7 @@ wt_get_editor() {
   setopt local_options pipefail
   
   # Check if first run needed
-  local config_file="${HOME}/.config/git-worktrees/config"
+  local config_file="$(wt_config_file)"
   if [[ ! -f "$config_file" ]]; then
     wt_first_run_editor_setup
     return $?
@@ -1311,7 +1510,7 @@ wt_load_editor_config() {
     return 0
   fi
   
-  local config_file="${HOME}/.config/git-worktrees/config"
+  local config_file="$(wt_config_file)"
   if [[ -f "$config_file" ]]; then
     local saved_editor
     saved_editor="$(grep "^editor=" "$config_file" 2>/dev/null | cut -d= -f2-)"
@@ -1330,7 +1529,7 @@ wt_load_full_config() {
   emulate -L zsh
   setopt local_options pipefail
   
-  local config_file="${HOME}/.config/git-worktrees/config"
+  local config_file="$(wt_config_file)"
   [[ ! -f "$config_file" ]] && return 0
   
   # Load behavior settings (don't override if already set)
@@ -1368,8 +1567,8 @@ wt_init_config() {
   emulate -L zsh
   setopt local_options pipefail
   
-  local config_dir="${HOME}/.config/git-worktrees"
-  local config_file="${config_dir}/config"
+  local config_dir="$(wt_config_dir)"
+  local config_file="$(wt_config_file)"
   
   # Don't overwrite existing config
   [[ -f "$config_file" ]] && return 0

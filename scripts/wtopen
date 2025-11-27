@@ -67,12 +67,11 @@ USAGE
 
   # -------- sanity checks --------
   if ! wt_git_is_repo; then
-    # Issue #4 fix - wt_error_not_git_repo always available
     wt_error_not_git_repo
     return 1
   fi
   
-  # Use centralized FZF detection (Issue #3 fix)
+  # Use centralized FZF detection
   wt_has_fzf || FZF_MISSING=1
 
   # Option: prune stale
@@ -81,8 +80,6 @@ USAGE
     git worktree prune -v || true
     return 0
   fi
-
-  # Issue #4 fix - wt_short_ref is always available from wt-common.zsh
 
   # Normalize requested branch
   local requested_branch=""
@@ -98,7 +95,6 @@ USAGE
 
   # -------- parse worktrees via shared helper (branch\tpath) --------
   local selectable porcelain
-  # Issue #2 fix - use wrapper function
   porcelain="$(wt_git_worktree_list_porcelain)"
   selectable="$(wt_parse_worktrees_porcelain 0 "$porcelain")"
 
@@ -109,7 +105,11 @@ USAGE
 
   # If --list, print and exit
   if (( list_only )); then
-    printf "%s" "$selectable" | awk -F"\t" '{printf "%-40s\t%s\n", $1, $2}'
+    if [[ -z "$selectable" ]]; then
+      echo "ℹ️  No worktrees found."
+    else
+      printf "%s" "$selectable" | awk -F"\t" '{printf "%-40s\t%s\n", $1, $2}'
+    fi
     return 0
   fi
 
@@ -126,18 +126,21 @@ USAGE
     local m
     local IFS=$'\n'
     for m in ${(f)matches}; do
-      local mp="${m#*\t}"
+      local mp="${m#*	}"  # Note: literal tab character
       local common; common="$(git -C "$mp" rev-parse --git-common-dir 2>/dev/null || true)"
       if [[ -n "$my_common" && -n "$common" && "$common" == "$my_common" ]]; then
-        preferred+="$m\n"
+        preferred+="$m"$'\n'
       else
-        others+="$m\n"
+        others+="$m"$'\n'
       fi
     done
     if [[ -n $preferred ]]; then
-      matches="$preferred"
-    else
-      matches="$matches"
+      # Remove trailing newline for consistency
+      matches="${preferred%$'\n'}"
+    elif [[ -n $others ]]; then
+      # No matches in current repo family, inform user and use all matches
+      wt_msg_info "No matches in current repo, showing all"
+      matches="${others%$'\n'}"
     fi
   fi
 
@@ -170,8 +173,7 @@ USAGE
         echo "   brew install fzf    # macOS"
         echo "   apt install fzf     # Ubuntu/Debian"
         echo ""
-        echo "   Or specify the exact path:"
-        echo "   wtopen -d /path/to/worktree"
+        echo "   Or use a more specific branch name, or cd to the worktree directory."
         return 1
       fi
     fi

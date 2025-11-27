@@ -24,10 +24,8 @@ wtls() {
 
   local use_fzf=0 do_open=0 open_app="" prune_stale=0
   local fast_mode=0
-  # Env toggle for fast mode
-  if [[ -n ${WT_FAST:-} && ${WT_FAST} != 0 && ${WT_FAST:l} != "false" ]]; then
-    fast_mode=1
-  fi
+  # Env toggle for fast mode (handles true/false, yes/no, on/off, 1/0)
+  wt_parse_bool "${WT_FAST:-}" && fast_mode=1
   local FZF_MISSING=
 
   while [[ $# -gt 0 ]]; do
@@ -57,9 +55,15 @@ USAGE
   done
 
   if ! wt_git_is_repo; then
-    # Issue #4 fix - wt_error_not_git_repo always available
     wt_error_not_git_repo
     return 1
+  fi
+
+  # Warn if --open is used without --fzf (it has no effect)
+  if (( do_open && !use_fzf )); then
+    wt_msg_warn "--open requires --fzf for interactive selection"
+    echo "   Usage: wtls --fzf --open"
+    echo ""
   fi
 
   if (( prune_stale )); then
@@ -68,12 +72,18 @@ USAGE
     return 0
   fi
 
-  # Use centralized FZF detection (Issue #3 fix)
-  wt_has_fzf || FZF_MISSING=1
+  # Use centralized FZF detection
+  if ! wt_has_fzf; then
+    FZF_MISSING=1
+    if (( use_fzf )); then
+      wt_msg_warn "FZF not installed, falling back to table output"
+      echo "   Install: brew install fzf (macOS) or apt install fzf (Linux)"
+      echo ""
+    fi
+  fi
 
   # Parse worktrees via shared helper: path|branch|head
   local porcelain wt_table
-  # Issue #2 fix - use wrapper function
   porcelain="$(wt_git_worktree_list_porcelain)"
   wt_table="$(wt_parse_worktrees_table "$porcelain")"
 
@@ -88,7 +98,6 @@ USAGE
     local rest="${row#*|}"
     local br_full="${rest%%|*}"
     local head="${rest##*|}"
-    # Issue #4 fix - wt_short_ref always available
     local shortbr
     shortbr="$(wt_short_ref "$br_full")"
     [[ -z "$shortbr" ]] && shortbr="(detached)@${head:0:7}"
@@ -107,9 +116,9 @@ USAGE
       if [[ -n "$upstream" ]]; then
         compare_ref="$upstream"
       else
-        # Use centralized default branch detection (Issue #6 fix)
         compare_ref="$(wt_find_default_branch "$dir")" || true
       fi
+      # Use centralized default branch detection
       if [[ -n "$compare_ref" ]]; then
         local lr; lr="$(git -C "$dir" rev-list --left-right --count "${compare_ref}...HEAD" 2>/dev/null || echo "0 0")"
         behind="$(echo "$lr" | awk '{print $1}')"
@@ -119,7 +128,7 @@ USAGE
       fi
     fi
 
-    lines+="$shortbr\t$dir\t$status_text\n"
+    lines+="$shortbr"$'\t'"$dir"$'\t'"$status_text"$'\n'
   done
 
   if (( use_fzf )) && [[ -z $FZF_MISSING ]]; then
@@ -127,8 +136,8 @@ USAGE
     out="$(printf "%s" "$lines" \
       | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
             --prompt="📋 Worktrees: " \
-            --with-nth=1,2 --delimiter='\t' \
-            --preview 'd=$(printf "%s" {} | awk -F"\t" "{print $2}"); if [ -d "$d" ]; then cd "$d" && git status -sb --untracked-files=all; echo; git log --oneline -n 20 --decorate --graph --color=always; fi' \
+            --with-nth=1,2 --delimiter=$'\t' \
+            --preview 'd=$(printf "%s" {} | cut -f2); if [ -d "$d" ]; then cd "$d" && git status -sb --untracked-files=all; echo; git log --oneline -n 20 --decorate --graph --color=always; fi' \
             --preview-window=right,60%)" || { wt_msg_error "No selection"; return 1; }
     local sel_branch sel_dir line
     line="$(printf "%s\n" "$out" | tail -n 1)"

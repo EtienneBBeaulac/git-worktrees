@@ -37,10 +37,11 @@ wtrm() {
   # Load editor configuration (for consistency with other commands)
   wt_load_editor_config 2>/dev/null || true
   
-  # Enable error recovery features (Issue #4 fix - stubs allow direct call)
+  # Transaction: always commit on exit (records what happened for debugging)
+  # Plain 'return' works everywhere - no special handling needed
   if wt_recovery_enabled; then
     wt_transaction_begin
-    trap 'wt_transaction_rollback 2>/dev/null || true' EXIT INT TERM
+    trap 'wt_transaction_commit 2>/dev/null || true' EXIT INT TERM
   fi
 
   local target_dir target_branch delete_branch=0 force=0 base_ref="" no_fzf=0 prune_only=0
@@ -81,7 +82,7 @@ Options:
   --no-fzf               Don’t use fzf for selection
   --prune-only           Only run 'git worktree prune' and exit
   --rm-detached          Remove all detached worktrees
-  --jobs <N>             Max parallel removals when using --rm-detached (smart default)
+  --jobs <N>             Max parallel removals (default: min(CPUs, 4, count))
   --yes                  Skip confirmation (used with --rm-detached)
 USAGE
         return 0;;
@@ -91,18 +92,13 @@ USAGE
 
   if ! wt_git_is_repo; then
     wt_msg_error "Not a git repo"
-    # Issue #4 fix - stubs allow direct call
     echo ""
     echo "💡 Hint: Run this command from inside a git repository"
     return 1
   fi
 
   # Keep remotes up-to-date (optional, consistent with wtnew)
-  echo "🔄  Fetching remotes…"
-  if ! git fetch --all --prune --tags --quiet 2>/dev/null; then
-    # Network failure - continue with cached refs (Issue #4 fix - stubs allow direct call)
-    echo "⚠️  Fetch failed, continuing with cached refs..."
-  fi
+  wt_fetch_remotes_safe
 
   if (( prune_only )); then
     echo "🧹 Pruning stale worktrees…"
@@ -110,12 +106,11 @@ USAGE
     return $?
   fi
 
-  # Use centralized FZF detection (Issue #3 fix)
+  # Use centralized FZF detection
   wt_has_fzf || FZF_MISSING=1
 
   # --- Build worktree table via shared helper: path|branch|head ---
   local porcelain wt_table
-  # Issue #2 fix - use wrapper function
   porcelain="$(wt_git_worktree_list_porcelain)"
   wt_table="$(wt_parse_worktrees_table "$porcelain")"
 
@@ -149,7 +144,7 @@ USAGE
       local wt_path sha
       while read -r wt_path sha; do
         [[ -z "$wt_path" ]] && continue
-        # Use centralized dirty check (Issue #8 fix)
+        # Use centralized dirty check
         if wt_is_worktree_dirty "$wt_path" && (( force == 0 )); then
           echo "⏭️  Skipping dirty detached worktree: $wt_path (use --force to remove)"
           ((skipped++)); continue
@@ -395,7 +390,7 @@ USAGE
   }
 
   # --- Safety checks in that worktree ---
-  # 1) Dirty? (Use centralized check - Issue #8 fix)
+  # 1) Dirty? (Use centralized check)
   local dirty=""
   if wt_is_worktree_dirty "$picked_path"; then
     dirty="$(wt_get_worktree_status "$picked_path")"
@@ -403,7 +398,7 @@ USAGE
   if [[ -n "$dirty" && $force -eq 0 ]]; then
     wt_msg_error "Worktree has uncommitted/untracked changes."
     
-    # Offer recovery options (Issue #4 fix - stubs allow direct call)
+    # Offer recovery options
     wt_show_hints untracked_changes "$picked_path"
     echo ""
     printf "💡 Options:\n"
@@ -429,11 +424,20 @@ USAGE
             return 1
           }
           echo "✅ Changes committed"
-          # Re-verify the worktree is actually clean now (Issue #8 fix)
+          # Re-verify the worktree is actually clean now
           if wt_is_worktree_dirty "$picked_path"; then
             dirty="$(wt_get_worktree_status "$picked_path")"
             echo "⚠️  Some changes remain uncommitted"
+            printf "   Continue anyway and lose these changes? [y/N]: "
+            local continue_dirty
+            read -r continue_dirty
+            if [[ "${continue_dirty:l}" != "y" ]]; then
+              echo "❎ Cancelled"
+              return 1
+            fi
+            force=1  # Force removal since user confirmed
           else
+            dirty=""
             echo "✅ Worktree is clean, continuing..."
           fi
         else
@@ -449,10 +453,18 @@ USAGE
           return 1
         }
         echo "✅ Changes stashed"
-        # Re-verify the worktree is actually clean now (Issue #8 fix)
+        # Re-verify the worktree is actually clean now
         if wt_is_worktree_dirty "$picked_path"; then
           dirty="$(wt_get_worktree_status "$picked_path")"
           echo "⚠️  Some changes remain (stash may have been incomplete)"
+          printf "   Continue anyway and lose these changes? [y/N]: "
+          local continue_dirty
+          read -r continue_dirty
+          if [[ "${continue_dirty:l}" != "y" ]]; then
+            echo "❎ Cancelled"
+            return 1
+          fi
+          force=1  # Force removal since user confirmed
         else
           dirty=""
           echo "✅ Worktree is clean, continuing..."
@@ -481,7 +493,7 @@ USAGE
     if (( ahead > 0 && force == 0 )); then
       wt_msg_error "Branch '$picked_branch' is ahead of '$upstream' by $ahead commit(s)."
       
-      # Offer recovery options (Issue #4 fix - stubs allow direct call)
+      # Offer recovery options
       echo ""
       printf "💡 Options:\n"
       echo "   [1] Push commits now"
@@ -520,16 +532,16 @@ USAGE
   echo "    Path:   $picked_path"
   echo "    Branch: $picked_branch"
   
-  # Record transaction for potential rollback (Issue #4 fix - stubs allow direct call)
+  # Record transaction for potential rollback
   wt_transaction_record "worktree_remove" "$picked_path"
   
-  # Issue #9 fix - capture error output instead of suppressing
+  # Capture error output for diagnosis
   local remove_output
   if ! remove_output="$(git worktree remove "${force:+--force}" "$picked_path" 2>&1)"; then
     wt_msg_error "Failed to remove worktree."
     [[ -n "$remove_output" ]] && echo "   Git error: $remove_output" >&2
     
-    # Diagnose and offer recovery (Issue #4 fix - stubs allow direct call)
+    # Diagnose and offer recovery
     echo ""
     echo "💡 Possible causes:"
     echo "   • Worktree is locked"
@@ -556,13 +568,12 @@ USAGE
   if (( delete_branch )); then
     if [[ -n "$picked_branch" && "$picked_branch" != "(detached)" ]]; then
       local still_used
-      # Issue #2 fix - use wrapper function
       still_used="$(wt_parse_worktrees_table "$(wt_git_worktree_list_porcelain)" | awk -F'|' -v b="$picked_branch" '$2==b{print $1}')"
       if [[ -n "$still_used" ]]; then
         echo "ℹ️  Branch '$picked_branch' still used by another worktree; skipping branch delete."
       else
         if [[ -z "$base_ref" ]]; then
-          # Use centralized default branch detection (Issue #6 fix)
+          # Use centralized default branch detection
           base_ref="$(wt_find_default_branch)" || true
         fi
         if [[ -z "$base_ref" ]]; then
@@ -580,8 +591,5 @@ USAGE
   fi
 
   echo "✅ Done."
-  
-  # Commit transaction on success (Issue #4 fix - stubs allow direct call)
-  wt_transaction_commit
-  trap - EXIT INT TERM
+  # Trap will auto-commit on exit
 }
