@@ -21,9 +21,9 @@ wt_show_contextual_help() {
 💡 Branch Selection Tips:
    • Type to filter branches fuzzy-find style
    • ↑↓ or Ctrl-J/K to navigate
-   • Enter to select, Esc to cancel
-   • Ctrl-A: Select all, Ctrl-D: Deselect all
-   • Tab: Toggle selection (multi-select mode)
+   • Enter to select
+   • Esc to cancel
+   • Type a new name to create a new branch
 EOF
       ;;
       
@@ -49,16 +49,17 @@ EOF
       
     fzf_shortcuts)
       cat <<'EOF'
-⌨️  Keyboard Shortcuts:
-   • Ctrl-E: Open editor at current worktree
-   • Ctrl-O: cd to worktree (stays in fzf)
-   • Ctrl-Y: Copy worktree path to clipboard
-   • Ctrl-D: Show git diff
-   • Ctrl-L: Show git log
-   • Ctrl-P: git pull in worktree
-   • Ctrl-F: git fetch in worktree
-   • Ctrl-R: Refresh worktree list
-   • ?: Show this help
+⌨️  Keyboard Shortcuts (wt hub):
+   • Enter:   Open worktree (or actions menu if toggled)
+   • Ctrl-O:  Open worktree in editor
+   • Ctrl-N:  Create new worktree
+   • Ctrl-R:  Create new (prefer reuse existing slot)
+   • Ctrl-D:  Remove selected worktree
+   • Ctrl-P:  Prune stale worktree entries
+   • Ctrl-A:  Actions menu (open, copy, remove, etc.)
+   • Ctrl-E:  Toggle Enter behavior (open ↔ menu)
+   • Ctrl-H:  Show help
+   • Esc:     Cancel/exit
 EOF
       ;;
       
@@ -96,20 +97,20 @@ wt_show_examples() {
   # Quick open by name
   $ wt feature/my-branch
   
-  # Create new worktree
-  $ wt --new feature/test
+  # Create new worktree (subcommand)
+  $ wt new feature/test
   
   # List all worktrees
-  $ wt --list
+  $ wt list
   
   # Remove worktree
-  $ wt --remove feature/old
+  $ wt remove feature/old
   
   # Open in specific editor
-  $ EDITOR=code wt feature/ui
+  $ WT_EDITOR=code wt feature/ui
   
-  # Start from specific directory
-  $ wt --start main
+  # Start in branch-first mode
+  $ wt --start new
 EOF
       ;;
       
@@ -121,19 +122,19 @@ EOF
   $ wtnew feature/new-feature
   
   # Create from specific base
-  $ wtnew feature/new --from main
+  $ wtnew feature/new -b main
   
   # Create and set upstream
   $ wtnew feature/new --push
   
-  # Create detached worktree
-  $ wtnew --detach v1.2.3
-  
-  # Prefer reusing existing worktree
+  # Prefer reusing existing worktree slot
   $ wtnew feature/existing --prefer-reuse
   
-  # Custom path
-  $ wtnew feature/new --path /custom/path
+  # Custom worktree directory
+  $ wtnew feature/new -d /custom/path
+  
+  # Using flags explicitly
+  $ wtnew -n feature/new -b origin/main --push
 EOF
       ;;
       
@@ -228,12 +229,12 @@ wt_show_hints() {
 👋 Welcome to git-worktrees!
 
 Quick Start:
-  1. Run 'wt' for interactive worktree selection
-  2. Press '?' in fzf to see keyboard shortcuts
-  3. Use 'wtnew' to create new worktrees
-  4. Use 'wtrm' to remove worktrees
+  1. Run 'wt' for interactive worktree hub
+  2. Press Ctrl-H in hub to see keyboard shortcuts
+  3. Use 'wt new' or 'wtnew' to create new worktrees
+  4. Use 'wt remove' or 'wtrm' to remove worktrees
 
-💡 Tip: Set WT_START_DIR to auto-cd on shell startup
+💡 Tip: Run 'wt --tutorial' for a guided introduction
 EOF
       ;;
       
@@ -245,7 +246,7 @@ Create your first worktree:
   $ wtnew feature/my-first-branch
 
 Or create from specific base:
-  $ wtnew feature/my-branch --from develop
+  $ wtnew feature/my-branch -b develop
 EOF
       ;;
       
@@ -337,16 +338,17 @@ EOF
   
   if [[ "$category" == "all" ]] || [[ "$category" == "shortcuts" ]]; then
     cat <<'EOF'
-KEYBOARD SHORTCUTS (in FZF):
-  Ctrl-E      Open in editor
-  Ctrl-O      CD to worktree
-  Ctrl-Y      Copy path
-  Ctrl-D      Show diff
-  Ctrl-L      Show log
-  Ctrl-P      Git pull
-  Ctrl-F      Git fetch
-  Ctrl-R      Refresh list
-  ?           Show help
+KEYBOARD SHORTCUTS (wt hub):
+  Enter       Open worktree (or menu if toggled)
+  Ctrl-O      Open in editor
+  Ctrl-N      Create new worktree
+  Ctrl-R      Create new (reuse slot)
+  Ctrl-D      Remove worktree
+  Ctrl-P      Prune stale entries
+  Ctrl-A      Actions menu
+  Ctrl-E      Toggle Enter mode
+  Ctrl-H      Show help
+  Esc         Cancel
 
 EOF
   fi
@@ -355,12 +357,12 @@ EOF
     cat <<'EOF'
 COMMON OPTIONS:
   --help, -h             Show help
-  --from <branch>        Base branch for new worktree
-  --push, -p             Set and push upstream
-  --force, -f            Skip safety checks
+  -b, --base <branch>    Base branch for new worktree
+  --push                 Set and push upstream
+  --force                Skip safety checks
   --delete-branch        Also delete the branch
   --dry-run              Show what would happen
-  --status               Show git status info
+  --prefer-reuse         Reuse existing clean worktree slot
 
 EOF
   fi
@@ -368,12 +370,15 @@ EOF
   if [[ "$category" == "all" ]] || [[ "$category" == "env" ]]; then
     cat <<'EOF'
 ENVIRONMENT VARIABLES:
-  WT_START_DIR           Default worktree on shell start
-  WT_WORKTREES_DIR       Base directory for worktrees
   WT_EDITOR              Editor to use (overrides EDITOR)
+  WT_APP                 Alias for WT_EDITOR
   WT_FZF_OPTS            Custom fzf options
-  WT_MAX_RECOVERY_ATTEMPTS  Retry attempts for errors
+  WT_FZF_HEIGHT          FZF height (default: 40%)
+  WT_DEBUG               Enable debug output
   WT_NO_RECOVERY         Disable error recovery
+  WT_TERMINAL_APP        Terminal for "Open in terminal"
+  WTNEW_ALWAYS_PUSH      Always push new branches
+  WTNEW_PREFER_REUSE     Prefer reusing worktree slots
 
 EOF
   fi
@@ -381,15 +386,16 @@ EOF
   if [[ "$category" == "all" ]] || [[ "$category" == "tips" ]]; then
     cat <<'EOF'
 PRO TIPS:
-  • Use Tab key for multi-select in fzf
-  • Set WT_START_DIR in ~/.zshrc for auto-cd
   • Prefix branch names with category: feature/, fix/, docs/
   • Use --prefer-reuse to avoid duplicate worktrees
-  • Run 'wt --list --status' to find stale branches
-  • Use Ctrl-R in fzf to refresh after git fetch
+  • Run 'wt list' or 'wtls' to see all worktrees
+  • Use Ctrl-A in hub for quick actions menu
+  • Use Ctrl-E to toggle Enter between open/menu mode
+  • Configure editor once: wt config set editor "Cursor"
 
 LEARN MORE:
   $ wt --help
+  $ wt --tutorial
   $ wtnew --help
   $ man git-worktree
 
@@ -417,10 +423,10 @@ wt_discover_features() {
 
 INTERACTIVE FEATURES:
   ✓ Fuzzy finding with fzf
-  ✓ Multi-select worktrees (Tab key)
-  ✓ Real-time git status
-  ✓ Keyboard shortcuts (Ctrl-E, Ctrl-O, etc.)
-  ✓ Contextual help (? key)
+  ✓ Real-time git status in preview
+  ✓ Keyboard shortcuts (Ctrl-A, Ctrl-N, etc.)
+  ✓ Contextual help (Ctrl-H)
+  ✓ Actions menu for quick operations
 
 SMART FEATURES:
   ✓ Branch name sanitization

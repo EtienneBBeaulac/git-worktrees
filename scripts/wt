@@ -484,7 +484,8 @@ USAGE
   # ============================================================================
   # Check if this looks like a first run (only 1 worktree = main repo AND no first-run flag set)
   local worktree_count
-  worktree_count=$(printf "%s" "$selectable" | sed '/^$/d' | wc -l | tr -d ' ')
+  # Note: Use printf "%s\n" to ensure trailing newline for accurate wc -l count
+  worktree_count=$(printf "%s\n" "$selectable" | sed '/^$/d' | wc -l | tr -d ' ')
   
   # Only show first-run message once (track via config)
   local first_run_shown
@@ -553,6 +554,50 @@ FIRSTRUN
     fi
   fi
 
+  # Helper function for actions menu (used by Ctrl-A and Enter in menu mode)
+  _wt_actions_menu() {
+    local sel_path="$1" sel_branch="$2"
+    local outa
+    outa="$(printf "%s\n" "Cancel" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Change editor" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
+      | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
+    
+    # Handle empty/cancel
+    if [[ -z "$outa" || "$outa" == "Cancel" ]]; then
+      echo "↩️  Cancelled"
+      return 0
+    fi
+    
+    case "$outa" in
+      ("Open") wt_open_or_show "$sel_path";;
+      ("Show path") echo "$sel_path";;
+      ("Copy path")
+        if wt_copy_to_clipboard "$sel_path"; then
+          echo "📋 Copied: $sel_path"
+        else
+          wt_msg_warn "No clipboard tool (install xclip or wl-copy on Linux)"
+          echo "$sel_path"
+        fi;;
+      ("Open in terminal")
+        wt_open_in_terminal "$sel_path";;
+      ("Print cd command")
+        echo "$(wt_cd_command "$sel_path")";;
+      ("Change editor")
+        wt_change_editor_interactive || return 1
+        ;;
+      ("Remove") wt_run wtrm -d "$sel_path";;
+      ("Remove all detached") wt_run wtrm --rm-detached;;
+      ("Prune stale") if wt_has_cmd wtrm; then wtrm --prune-only; else git worktree prune -v; fi;;
+      ("Set upstream (origin)")
+        local b="${sel_branch}" remote="origin"
+        if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
+          git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || wt_msg_error "Failed to set upstream"
+        else
+          echo "ℹ️  Remote $remote/$b not found. Trying push -u…"
+          git -C "$sel_path" push -u "$remote" "$b" || wt_msg_error "Push failed"
+        fi;;
+    esac
+  }
+
   local out key line
   local header="Enter=open │ ^N=new │ ^D=remove │ ^A=actions │ ^P=prune │ ^E=toggle-enter │ ^H=help"
   out="$(printf "%s" "$selectable" | FZF_DEFAULT_OPTS= command fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} --prompt='📂  Worktrees: ' --header="$header" --with-nth=1 --delimiter=$'\t' --expect=enter,ctrl-o,ctrl-d,ctrl-p,ctrl-n,ctrl-r,ctrl-a,ctrl-e,ctrl-h --preview 'd=$(printf %s {} | cut -f2-); if [ -d "$d" ]; then echo "Path: $d"; echo; git -C "$d" status -sb --untracked-files=all 2>/dev/null; echo; git -C "$d" log --oneline -n 15 --decorate --graph --color=always 2>/dev/null; fi' --preview-window=right,60%)" || true
@@ -590,39 +635,8 @@ FIRSTRUN
   case "${key:-enter}" in
     enter|ctrl-o)
       if [[ "$enter_default" == "menu" ]]; then
-        # Open actions menu instead of opening directly (same options as Ctrl-A)
-        local outa
-        outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Change editor" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
-          | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
-        case "$outa" in
-          ("Open") wt_open_or_show "$sel_path";;
-          ("Show path") echo "$sel_path";;
-          ("Copy path")
-            if command -v pbcopy >/dev/null 2>&1; then
-              printf "%s" "$sel_path" | pbcopy && echo "📋 Copied: $sel_path"
-            else
-              echo "$sel_path"
-            fi;;
-          ("Open in terminal")
-            local term_app="${WT_TERMINAL_APP:-iTerm}"
-            open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || wt_msg_error "Could not open terminal";;
-          ("Print cd command")
-            echo "$(wt_cd_command "$sel_path")";;
-          ("Change editor")
-            wt_change_editor_interactive || return 1
-            ;;
-          ("Remove") wt_run wtrm -d "$sel_path";;
-          ("Remove all detached") wt_run wtrm --rm-detached;;
-          ("Prune stale") if wt_has_cmd wtrm; then wtrm --prune-only; else git worktree prune -v; fi;;
-          ("Set upstream (origin)")
-            local b="${sel_branch}"; local remote="origin"
-            if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
-              git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || wt_msg_error "Failed to set upstream"
-            else
-              echo "ℹ️  Remote $remote/$b not found. Trying push -u…"
-              git -C "$sel_path" push -u "$remote" "$b" || wt_msg_error "Push failed"
-            fi;;
-        esac
+        # Open actions menu instead of opening directly
+        _wt_actions_menu "$sel_path" "$sel_branch"
         return 0
       fi
       wt_open_or_show "$sel_path"
@@ -656,48 +670,20 @@ FIRSTRUN
       fi
       ;;
     ctrl-a)
-      # Simple actions menu
-      local outa
-      outa="$(printf "%s\n" "Open" "Show path" "Copy path" "Open in terminal" "Print cd command" "Change editor" "Remove" "Remove all detached" "Prune stale" "Set upstream (origin)" \
-        | FZF_DEFAULT_OPTS= command fzf --prompt="⚙️  Action: " --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-})" || true
-      case "$outa" in
-        ("Open") wt_open_or_show "$sel_path";;
-        ("Show path") echo "$sel_path";;
-        ("Copy path")
-          if command -v pbcopy >/dev/null 2>&1; then
-            printf "%s" "$sel_path" | pbcopy && echo "📋 Copied: $sel_path"
-          else
-            echo "$sel_path"
-          fi;;
-        ("Open in terminal")
-          local term_app="${WT_TERMINAL_APP:-iTerm}"
-          open -a "$term_app" "$sel_path" >/dev/null 2>&1 || open -a Terminal "$sel_path" >/dev/null 2>&1 || wt_msg_error "Could not open terminal";;
-        ("Print cd command")
-          echo "$(wt_cd_command "$sel_path")";;
-        ("Change editor")
-          wt_change_editor_interactive || return 1
-          ;;
-        ("Remove") wt_run wtrm -d "$sel_path";;
-        ("Remove all detached") wt_run wtrm --rm-detached;;
-        ("Prune stale") if wt_has_cmd wtrm; then wtrm --prune-only; else git worktree prune -v; fi;;
-        ("Set upstream (origin)")
-          local b="${sel_branch}"; local remote="origin"
-          if git -C "$sel_path" show-ref --verify --quiet "refs/remotes/$remote/$b"; then
-            git -C "$sel_path" branch --set-upstream-to="$remote/$b" >/dev/null 2>&1 && echo "✅ Upstream: $remote/$b" || wt_msg_error "Failed to set upstream"
-          else
-            echo "ℹ️  Remote $remote/$b not found. Trying push -u…"
-            git -C "$sel_path" push -u "$remote" "$b" || wt_msg_error "Push failed"
-          fi;;
-      esac
+      # Actions menu (return 0 to match Enter-in-menu-mode behavior)
+      _wt_actions_menu "$sel_path" "$sel_branch"
+      return 0
       ;;
     ctrl-e)
       # Toggle Enter default between open and menu, then re-run hub with same view
+      local detached_flag=""
+      (( include_detached )) && detached_flag="--detached"
       if [[ "$enter_default" == "open" ]]; then
         wt_set_config WT_ENTER_BEHAVIOR menu 2>/dev/null || true
-        WTHUB_ENTER_DEFAULT=menu wt ${include_detached:+--detached} --start list
+        WTHUB_ENTER_DEFAULT=menu wt $detached_flag --start list
       else
         wt_set_config WT_ENTER_BEHAVIOR open 2>/dev/null || true
-        WTHUB_ENTER_DEFAULT=open wt ${include_detached:+--detached} --start list
+        WTHUB_ENTER_DEFAULT=open wt $detached_flag --start list
       fi
       return $?
       ;;
@@ -707,7 +693,15 @@ wt hub
   Enter: ${enter_default}   (Ctrl-E toggles)
   Keys:  Ctrl-N new   Ctrl-R new (reuse)   Ctrl-D remove   Ctrl-P prune   Ctrl-A actions   Ctrl-O open   Ctrl-H help
   Rows:  "➕ New branch…" starts branch-first flow; "🧵 Show detached…" toggles headless entries
+
+Press Enter to continue...
 HELP
+      read -r || true  # Wait for user to read
+      # Re-launch hub with same state
+      local detached_flag=""
+      (( include_detached )) && detached_flag="--detached"
+      wt $detached_flag --start list
+      return $?
       ;;
     *)
       # Default fallback: open

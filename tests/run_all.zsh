@@ -177,10 +177,10 @@ run_test_file() {
   fi
   
   # Run test with timeout
-  local output status=0
-  output="$(timeout 60 "$shell" "$test_file" 2>&1)" || status=$?
+  local output exit_status=0
+  output="$(timeout 60 "$shell" "$test_file" 2>&1)" || exit_status=$?
   
-  if (( status == 0 )); then
+  if (( exit_status == 0 )); then
     if (( VERBOSE )); then
       echo "$output"
       echo -e "${TEST_GREEN}✓ PASSED${TEST_NC}"
@@ -189,7 +189,7 @@ run_test_file() {
     fi
     ((SUITE_PASSED++))
     return 0
-  elif (( status == 124 )); then
+  elif (( exit_status == 124 )); then
     if (( VERBOSE )); then
       echo -e "${TEST_YELLOW}⏱ TIMEOUT${TEST_NC}"
     else
@@ -200,7 +200,7 @@ run_test_file() {
   else
     if (( VERBOSE )); then
       echo "$output"
-      echo -e "${TEST_RED}✗ FAILED (exit $status)${TEST_NC}"
+      echo -e "${TEST_RED}✗ FAILED (exit $exit_status)${TEST_NC}"
     else
       echo -e "${TEST_RED}FAIL${TEST_NC}"
       # Show last few lines of output
@@ -323,7 +323,7 @@ main() {
       cat_tests=( $(discover_tests "$cat" "$FILTER") )
       
       if (( ${#cat_tests[@]} > 0 )); then
-        echo -e "${TEST_BLUE}━━━ ${cat^} Tests ━━━${TEST_NC}"
+        echo -e "${TEST_BLUE}━━━ ${(C)cat} Tests ━━━${TEST_NC}"
         
         if (( PARALLEL && ${#cat_tests[@]} > 3 )); then
           run_tests_parallel "${cat_tests[@]}"
@@ -345,7 +345,7 @@ main() {
     fi
   else
     # Run single category
-    echo -e "${TEST_BLUE}━━━ ${CATEGORY^} Tests ━━━${TEST_NC}"
+    echo -e "${TEST_BLUE}━━━ ${(C)CATEGORY} Tests ━━━${TEST_NC}"
     
     if (( PARALLEL && ${#test_files[@]} > 3 )); then
       run_tests_parallel "${test_files[@]}"

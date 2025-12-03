@@ -5,6 +5,10 @@ set -e
 SCRIPT_DIR="${0:a:h}"
 source "$SCRIPT_DIR/lib/test_helpers.zsh" 2>/dev/null || source "${SCRIPT_DIR}/../lib/test_helpers.zsh" 2>/dev/null || true
 
+# Source wt-common.zsh to get the functions we're testing
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$ROOT_DIR/scripts/lib/wt-common.zsh"
+
 TEST_NAME="v1.1.1 UX Flow"
 test_setup
 

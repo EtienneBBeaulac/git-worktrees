@@ -36,17 +36,27 @@ chmod +x "$STUB_BIN/fzf"
 wt --start list >/dev/null 2>&1 || true
 
 # Second: ctrl-h (help) capture output
+# FZF stub returns ctrl-h on first call, then exits on subsequent calls to avoid infinite loop
 cat > "$STUB_BIN/fzf" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-cat > "${TEST_TMP:-/tmp}/fzf_keys_help_in.txt"
-printf "%s\n" "ctrl-h"
-printf "%b\n" "feature/key\t$TEST_TMP/repo-key"
-exit 0
+COUNT_FILE="${TEST_TMP:-/tmp}/fzf_help_count"
+IN_NUM=1
+if [[ -f "$COUNT_FILE" ]]; then IN_NUM=$(( $(cat "$COUNT_FILE") + 1 )); fi
+echo -n "$IN_NUM" > "$COUNT_FILE"
+cat > "${TEST_TMP:-/tmp}/fzf_keys_help_in_${IN_NUM}.txt"
+if [[ "$IN_NUM" == "1" ]]; then
+  printf "%s\n" "ctrl-h"
+  printf "%b\n" "feature/key\t${TEST_TMP}/repo-key"
+  exit 0
+else
+  # Exit on subsequent calls to prevent infinite loop
+  exit 1
+fi
 EOF
 chmod +x "$STUB_BIN/fzf"
 
-OUT=$(wt --start list || true)
+OUT=$(wt --start list 2>&1 || true)
 print -r -- "$OUT" | grep -Fq "wt hub" || { echo "help output not shown"; exit 1; }
 
 echo "wt hub keys prune/help test OK"

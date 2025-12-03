@@ -328,6 +328,12 @@ USAGE
     fi
 
     if (( no_fzf )) || [[ -n $FZF_MISSING ]]; then
+      # In non-interactive mode, fail if no worktree path specified
+      if ! wt_is_interactive; then
+        wt_msg_error "No worktree path specified"
+        wt_msg_info "Provide worktree path: wtrm <path-to-worktree>"
+        return 1
+      fi
       echo "🧭 Select a worktree to remove:"
       printf "%s\n" "$display"
       printf "Choice (type full path or 'bulk-remove'): "
@@ -397,6 +403,12 @@ USAGE
   fi
   if [[ -n "$dirty" && $force -eq 0 ]]; then
     wt_msg_error "Worktree has uncommitted/untracked changes."
+    
+    # In non-interactive mode, fail immediately with clear guidance
+    if ! wt_is_interactive; then
+      wt_msg_info "Commit/stash changes first, or use --force to remove anyway"
+      return 1
+    fi
     
     # Offer recovery options
     wt_show_hints untracked_changes "$picked_path"
@@ -493,6 +505,12 @@ USAGE
     if (( ahead > 0 && force == 0 )); then
       wt_msg_error "Branch '$picked_branch' is ahead of '$upstream' by $ahead commit(s)."
       
+      # In non-interactive mode, fail immediately with clear guidance
+      if ! wt_is_interactive; then
+        wt_msg_info "Push commits first, or use --force to remove anyway"
+        return 1
+      fi
+      
       # Offer recovery options
       echo ""
       printf "💡 Options:\n"
@@ -540,6 +558,12 @@ USAGE
   if ! remove_output="$(git worktree remove "${force:+--force}" "$picked_path" 2>&1)"; then
     wt_msg_error "Failed to remove worktree."
     [[ -n "$remove_output" ]] && echo "   Git error: $remove_output" >&2
+    
+    # In non-interactive mode, fail immediately
+    if ! wt_is_interactive; then
+      wt_msg_info "Use --force to force removal"
+      return 1
+    fi
     
     # Diagnose and offer recovery
     echo ""

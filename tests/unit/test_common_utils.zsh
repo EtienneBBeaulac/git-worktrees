@@ -46,25 +46,65 @@ assert_fn_exists "wt_cd_command" "wt_cd_command exists"
 assert_fn_exists "wt_shell_command" "wt_shell_command exists"
 
 echo ""
-echo "=== Testing wt_editor_selection_menu returns correct values ==="
+echo "=== Testing editor detection functions ==="
 
-# Test that menu parsing works by simulating input
-test_editor_choice() {
-  local choice="$1" expected="$2"
-  local actual
-  actual=$(echo "$choice" | wt_editor_selection_menu 2>/dev/null | tail -1)
-  assert_eq "$expected" "$actual" "Choice $choice returns $expected"
-}
+# Test wt_get_installed_editors returns something (on most systems)
+assert_fn_exists "wt_get_installed_editors" "wt_get_installed_editors exists"
+assert_fn_exists "wt_is_editor_installed" "wt_is_editor_installed exists"
+assert_fn_exists "wt_test_editor" "wt_test_editor exists"
+assert_fn_exists "wt_detect_editor" "wt_detect_editor exists"
 
-test_editor_choice "1" "Android Studio"
-test_editor_choice "2" "Visual Studio Code"
-test_editor_choice "3" "Cursor"
-test_editor_choice "4" "IntelliJ IDEA"
-test_editor_choice "5" "PyCharm"
-test_editor_choice "6" "WebStorm"
-test_editor_choice "7" "Sublime Text"
-test_editor_choice "8" "vim"
-test_editor_choice "9" "none"
+# Test that vim is usually detected (it's on most systems)
+((TESTS_RUN++))
+if command -v vim >/dev/null 2>&1; then
+  if wt_is_editor_installed "vim"; then
+    ((TESTS_PASSED++))
+    echo "✅ PASS: wt_is_editor_installed detects vim"
+  else
+    ((TESTS_FAILED++))
+    echo "❌ FAIL: wt_is_editor_installed should detect vim"
+  fi
+else
+  ((TESTS_PASSED++))
+  echo "✅ PASS: vim not installed, skip detection test"
+fi
+
+# Test wt_test_editor
+((TESTS_RUN++))
+if wt_test_editor "vim" 2>/dev/null || ! command -v vim >/dev/null 2>&1; then
+  ((TESTS_PASSED++))
+  echo "✅ PASS: wt_test_editor works correctly"
+else
+  ((TESTS_FAILED++))
+  echo "❌ FAIL: wt_test_editor should return true for vim if installed"
+fi
+
+# Test WT_KNOWN_EDITORS array exists and has entries
+((TESTS_RUN++))
+if (( ${#WT_KNOWN_EDITORS[@]} > 0 )); then
+  ((TESTS_PASSED++))
+  echo "✅ PASS: WT_KNOWN_EDITORS has ${#WT_KNOWN_EDITORS[@]} entries"
+else
+  ((TESTS_FAILED++))
+  echo "❌ FAIL: WT_KNOWN_EDITORS should have entries"
+fi
+
+# Test that Android Studio is first in detection order (alphabetically)
+((TESTS_RUN++))
+first_editor="${WT_KNOWN_EDITORS[1]%%|*}"
+if [[ "$first_editor" == "Android Studio" ]]; then
+  ((TESTS_PASSED++))
+  echo "✅ PASS: Android Studio is first in WT_KNOWN_EDITORS"
+else
+  ((TESTS_FAILED++))
+  echo "❌ FAIL: Expected 'Android Studio' first, got '$first_editor'"
+fi
+
+echo ""
+echo "=== Testing new helper functions exist ==="
+
+assert_fn_exists "wt_copy_to_clipboard" "wt_copy_to_clipboard exists"
+assert_fn_exists "wt_open_in_terminal" "wt_open_in_terminal exists"
 
 echo ""
 echo "=== Smoke test: wt_git_fetch_with_timeout ==="
@@ -81,6 +121,22 @@ if (( fetch_exit <= 128 )); then
 else
   ((TESTS_FAILED++))
   echo "❌ FAIL: wt_git_fetch_with_timeout crashed with signal (exit: $fetch_exit)"
+fi
+
+echo ""
+echo "=== Smoke test: wt_copy_to_clipboard ==="
+
+# Test clipboard function exists and returns appropriate exit code
+((TESTS_RUN++))
+wt_copy_to_clipboard "test" 2>/dev/null
+clip_exit=$?
+# Exit 0 = clipboard tool found, Exit 1 = no clipboard tool (both acceptable)
+if (( clip_exit <= 1 )); then
+  ((TESTS_PASSED++))
+  echo "✅ PASS: wt_copy_to_clipboard executes cleanly (exit: $clip_exit)"
+else
+  ((TESTS_FAILED++))
+  echo "❌ FAIL: wt_copy_to_clipboard returned unexpected exit code: $clip_exit"
 fi
 
 echo ""

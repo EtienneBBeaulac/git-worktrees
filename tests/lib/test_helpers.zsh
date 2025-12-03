@@ -45,21 +45,21 @@ test_suite_init() {
 test_start() {
   local name="$1"
   TEST_NAME="$name"
-  ((TEST_TOTAL++))
+  (( ++TEST_TOTAL ))  # Use pre-increment to avoid returning 0 (falsy) with set -e
   echo -n "  ${name}... "
 }
 
 # Mark test as passed
 test_pass() {
   local msg="${1:-}"
-  ((TEST_PASSED++))
+  (( ++TEST_PASSED ))
   echo -e "${TEST_GREEN}PASS${TEST_NC}${msg:+ ($msg)}"
 }
 
 # Mark test as failed
 test_fail() {
   local msg="$1"
-  ((TEST_FAILED++))
+  (( ++TEST_FAILED ))
   echo -e "${TEST_RED}FAIL${TEST_NC}"
   echo -e "    ${TEST_RED}✗ $msg${TEST_NC}"
   
@@ -76,7 +76,7 @@ test_fail() {
 # Mark test as skipped
 test_skip() {
   local reason="${1:-no reason given}"
-  ((TEST_SKIPPED++))
+  (( ++TEST_SKIPPED ))
   echo -e "${TEST_YELLOW}SKIP${TEST_NC} ($reason)"
 }
 
@@ -136,6 +136,20 @@ test_setup_repo_with_remote() {
   cd "$REPO_DIR"
   git remote add origin "$BARE_DIR"
   git push -q origin main
+}
+
+# Simple test setup (creates TEST_TMP and a basic repo)
+# Legacy function for older tests
+test_setup() {
+  export TEST_TMP="$(mktemp -d)"
+  mkdir -p "$TEST_TMP/repo1"
+  cd "$TEST_TMP/repo1"
+  git init -q -b main
+  git config user.name "Test User"
+  git config user.email "test@example.com"
+  echo "initial" > file.txt
+  git add .
+  git commit -q -m "Initial commit"
 }
 
 # Cleanup test repository
@@ -590,6 +604,46 @@ assert_performance() {
   fi
   
   return 0
+}
+
+# ============================================================================
+# Non-Interactive Test Helpers
+# ============================================================================
+
+# Run command in non-interactive mode, capturing output
+# Usage: run_non_interactive <command> [args...]
+# Sets: TEST_OUTPUT (combined stdout+stderr), TEST_EXIT_CODE
+run_non_interactive() {
+  # Capture both output and exit code correctly
+  # The && ... || pattern ensures we get the real exit code, not 0 from || true
+  TEST_OUTPUT=$(WT_NON_INTERACTIVE=1 "$@" 2>&1) && TEST_EXIT_CODE=0 || TEST_EXIT_CODE=$?
+}
+
+# Assert command fails with specific error pattern
+# Usage: assert_fails_with "pattern" <command> [args...]
+assert_fails_with() {
+  local pattern="$1"; shift
+  run_non_interactive "$@"
+  if (( TEST_EXIT_CODE == 0 )); then
+    test_fail "Expected command to fail, but it succeeded"
+    return 1
+  fi
+  if ! echo "$TEST_OUTPUT" | grep -qE "$pattern"; then
+    test_fail "Expected error matching '$pattern', got: $TEST_OUTPUT"
+    return 1
+  fi
+  test_pass
+}
+
+# Assert command succeeds
+# Usage: assert_succeeds <command> [args...]
+assert_succeeds() {
+  run_non_interactive "$@"
+  if (( TEST_EXIT_CODE != 0 )); then
+    test_fail "Command failed with exit $TEST_EXIT_CODE: $TEST_OUTPUT"
+    return 1
+  fi
+  test_pass
 }
 
 # ============================================================================

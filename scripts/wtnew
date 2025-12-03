@@ -39,7 +39,12 @@ wtnew() {
   # -------- flags (optional) --------
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -n|--name) new_branch="$2"; shift 2;;
+      -n|--name)
+        if [[ -n ${new_branch:-} ]]; then
+          echo "Error: Branch already specified as '$new_branch', cannot also use -n '$2'"
+          return 2
+        fi
+        new_branch="$2"; shift 2;;
       -b|--base) base_ref="$2"; shift 2;;
       -d|--dir)  wt_dir="$2"; shift 2;;
       -r|--remote) explicit_remote="$2"; shift 2;;
@@ -53,8 +58,13 @@ wtnew() {
         return 0;;
       -h|--help)
         cat <<'USAGE'
-Usage: wtnew [options]
-  -n, --name   Branch name (new or existing)
+Usage: wtnew [options] [branch-name]
+
+Arguments:
+  branch-name  Branch name (new or existing) - same as -n/--name
+
+Options:
+  -n, --name   Branch name (alternative to positional argument)
   -b, --base   Base ref (e.g., origin/main) when creating a brand-new branch
   -d, --dir    Worktree directory
   -r, --remote Remote to track/push (default: infer from base or origin)
@@ -63,15 +73,32 @@ Usage: wtnew [options]
   --push       Push new branch to the selected remote and set upstream
   --prefer-reuse  Prefer reusing an existing worktree slot (clean, safe) over creating a new dir
   --inside-ok  Allow creating a worktree path inside current repo (unsafe)
+
 Notes:
   - If the branch exists locally → a worktree is created on that branch.
   - If the branch exists on a remote → local tracking branch is created from that remote.
   - If the branch does not exist anywhere → new branch off --base (or picked interactively).
+
+Examples:
+  wtnew feature/my-branch              # Create/open worktree for branch
+  wtnew feature/new -b main            # New branch from main
+  wtnew feature/new --push             # Create and push to remote
+
 Debug:
   - Set WTNEW_DEBUG=1 to print branch/base lists and counts.
 USAGE
         return 0;;
-      *) echo "Unknown option: $1"; return 2;;
+      -*)
+        echo "Unknown option: $1"; return 2;;
+      *)
+        # Positional argument = branch name
+        if [[ -z ${new_branch:-} ]]; then
+          new_branch="$1"
+        else
+          echo "Error: Branch already specified as '$new_branch', got extra argument '$1'"
+          return 2
+        fi
+        shift;;
     esac
   done
 
@@ -106,15 +133,21 @@ USAGE
     local all_remotes=$(git remote)
     local closest=$(echo "$all_remotes" | grep -i "$explicit_remote" | head -1)
     if [[ -n "$closest" ]]; then
-      echo ""
-      echo "💡 Did you mean: $closest?"
-      printf "   Use '$closest'? [Y/n]: "
-      local use_closest; read -r use_closest
-      if [[ "${use_closest:l}" != "n" ]]; then
-        explicit_remote="$closest"
-        echo "   Using: $explicit_remote"
+      if wt_is_interactive; then
+        echo ""
+        echo "💡 Did you mean: $closest?"
+        printf "   Use '$closest'? [Y/n]: "
+        local use_closest; read -r use_closest
+        if [[ "${use_closest:l}" != "n" ]]; then
+          explicit_remote="$closest"
+          echo "   Using: $explicit_remote"
+        else
+          return 1
+        fi
       else
-        return 1
+        # Non-interactive: use the closest match automatically
+        wt_msg_info "Using closest match: $closest"
+        explicit_remote="$closest"
       fi
     else
       return 1
@@ -146,7 +179,7 @@ USAGE
       out="$(printf "%s\n" "$all_branches" \
         | fzf --height=${WT_FZF_HEIGHT:-40%} --reverse ${WT_FZF_OPTS:-} \
               --prompt="🆕  Branch (type to create OR pick existing): " \
-              --header="Type to filter or create new · Enter=select · ?=help" \
+              --header="Type to filter or create new · Enter=select · Esc=cancel" \
               --preview 'if [ -n "{}" ] && git rev-parse --verify -q {} >/dev/null; then \
                             git log --oneline -n 20 --decorate --graph --color=always {}; \
                           else echo "➕ New branch"; fi' \
@@ -170,7 +203,14 @@ USAGE
         echo "✓ Creating new branch: $new_branch"
       fi
     else
-      printf "🆕  Branch name (new or existing): "; read -r new_branch
+      # Non-FZF mode: prompt for branch name
+      if wt_is_interactive; then
+        printf "🆕  Branch name (new or existing): "; read -r new_branch
+      else
+        wt_msg_error "Branch name required"
+        wt_msg_info "Provide branch name as argument: wtnew <branch-name>"
+        return 1
+      fi
     fi
   fi
   [[ -z $new_branch ]] && { wt_msg_error "Branch name required"; return 1; }
@@ -220,6 +260,11 @@ USAGE
         printf "%s\n" "$branch_list" >&2
       fi
       if [[ -n $FZF_MISSING ]]; then
+        if ! wt_is_interactive; then
+          wt_msg_error "Could not detect default branch and no base ref specified"
+          wt_msg_info "Provide base branch: wtnew <branch-name> -b <base-branch>"
+          return 1
+        fi
         echo "📝  Branches available (pick base):"
         printf "%s\n" "$branch_list"
         echo ""
@@ -334,8 +379,13 @@ USAGE
   parent_dir="$(dirname "$repo_root")"
   default_dir="${parent_dir}/${repo}-${new_branch//\//-}"
   if (( skip_create == 0 && reuse_slot == 0 )) && [[ -z ${wt_dir:-} ]]; then
-    printf "📂  Worktree dir [%s]: " "$default_dir"; read -r wt_dir
-    wt_dir=${wt_dir:-$default_dir}
+    if wt_is_interactive; then
+      printf "📂  Worktree dir [%s]: " "$default_dir"; read -r wt_dir
+      wt_dir=${wt_dir:-$default_dir}
+    else
+      # Non-interactive: use default directory
+      wt_dir="$default_dir"
+    fi
   fi
   # Normalize to absolute paths for validation
   local wt_dir_abs="${wt_dir:A}"
@@ -351,6 +401,12 @@ USAGE
   if (( skip_create == 0 && reuse_slot == 0 )); then
     if [[ -e "$wt_dir_abs" ]]; then
       wt_msg_error "Path already exists: $wt_dir"
+      
+      # In non-interactive mode, fail immediately with clear guidance
+      if ! wt_is_interactive; then
+        wt_msg_info "Use --force to overwrite, --prefer-reuse to reuse, or specify different --dir"
+        return 1
+      fi
       
       # Offer recovery options
       wt_offer_recovery already_exists "$wt_dir"

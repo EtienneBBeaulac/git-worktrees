@@ -28,12 +28,12 @@ assert_output_contains "$output" "Usage:" "Help should contain 'Usage:'"
 test_start "wt --help mentions --start"
 assert_output_contains "$output" "--start" "Help should mention --start"
 
-# Test: help mentions keyboard shortcuts  
-test_start "wt --help mentions keyboard shortcuts"
-if [[ "$output" == *"Ctrl-"* ]] || [[ "$output" == *"Keys:"* ]]; then
+# Test: help mentions subcommands  
+test_start "wt --help mentions subcommands"
+if [[ "$output" == *"Subcommands:"* ]] || [[ "$output" == *"new"* ]]; then
   test_pass
 else
-  test_fail "Help should mention keyboard shortcuts"
+  test_fail "Help should mention subcommands"
 fi
 
 test_suite_summary

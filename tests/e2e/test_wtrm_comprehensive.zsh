@@ -12,7 +12,7 @@ echo ""
 # Setup
 TEST_ROOT=$(mktemp -d)
 cd "$TEST_ROOT"
-git init -q
+git init -q -b main  # Explicitly use 'main' as default branch
 git config user.email "test@example.com"
 git config user.name "Test User"
 echo "initial" > file.txt
@@ -94,12 +94,15 @@ fi
 echo ""
 echo "Test 7: Error handling for non-git directory"
 cd /tmp
-if ! wtrm --prune-only 2>&1 | grep -q "Not a git repo"; then
+# Use non-interactive mode to avoid any prompts blocking the test
+output=$(WT_NON_INTERACTIVE=1 wtrm --prune-only 2>&1) || true
+if echo "$output" | grep -qE "(Not a git|not.*git.*repo)"; then
+  echo "  ✅ PASS: Properly detects non-git directory"
+else
   echo "  ❌ FAIL: Should detect non-git directory"
+  echo "  Output was: $output"
   cd "$TEST_ROOT"
   exit 1
-else
-  echo "  ✅ PASS: Properly detects non-git directory"
 fi
 cd "$TEST_ROOT"
 

@@ -78,16 +78,16 @@ result=$(wt_msg_success "success text")
 # wt_msg_info tests
 # ============================================================================
 
-test_start "wt_msg_info outputs to stdout"
-result=$(wt_msg_info "test info" 2>/dev/null)
+test_start "wt_msg_info outputs to stderr"
+result=$(wt_msg_info "test info" 2>&1 >/dev/null)
 [[ -n "$result" ]] && test_pass || test_fail
 
 test_start "wt_msg_info includes info emoji"
-result=$(wt_msg_info "test")
+result=$(wt_msg_info "test" 2>&1)
 [[ "$result" == *"ℹ"* ]] && test_pass || test_fail
 
 test_start "wt_msg_info includes message text"
-result=$(wt_msg_info "info text")
+result=$(wt_msg_info "info text" 2>&1)
 [[ "$result" == *"info text"* ]] && test_pass || test_fail
 
 # ============================================================================

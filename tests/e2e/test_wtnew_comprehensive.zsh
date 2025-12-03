@@ -12,7 +12,7 @@ echo ""
 # Setup
 TEST_ROOT=$(mktemp -d)
 cd "$TEST_ROOT"
-git init -q
+git init -q -b main  # Explicitly use 'main' as default branch
 git config user.email "test@example.com"
 git config user.name "Test User"
 echo "initial" > file.txt
@@ -70,12 +70,14 @@ fi
 echo ""
 echo "Test 6: Error handling when path exists"
 mkdir -p "${PARENT_DIR}/test-exists"
-# This should fail with error (not crash)
-if ! wtnew --name "test-exists" --base "main" --no-open --dir "${PARENT_DIR}/test-exists" 2>&1 | grep -q "already exists"; then
-  echo "  ❌ FAIL: Path exists error not detected"
-  exit 1
-else
+# This should fail with error (not crash) - use non-interactive mode to avoid prompts
+output=$(WT_NON_INTERACTIVE=1 wtnew --name "test-exists" --base "main" --no-open --dir "${PARENT_DIR}/test-exists" 2>&1) || true
+if echo "$output" | grep -qE "(already exists|Path.*exists)"; then
   echo "  ✅ PASS: Path exists error properly detected"
+else
+  echo "  ❌ FAIL: Path exists error not detected"
+  echo "  Output was: $output"
+  exit 1
 fi
 rm -rf "${PARENT_DIR}/test-exists"
 
@@ -105,7 +107,8 @@ if typeset -f wt_validate_branch_name >/dev/null 2>&1; then
     exit 1
   fi
   
-  if ! wt_validate_branch_name "invalid@#branch"; then
+  # Test with a truly invalid branch name (contains ~)
+  if ! wt_validate_branch_name "invalid~branch"; then
     echo "  ✅ PASS: Invalid branch name rejected"
   else
     echo "  ❌ FAIL: Invalid branch name accepted"

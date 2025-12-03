@@ -19,6 +19,10 @@ export WT_DEBUG=1
 REPO_DIR="$TEST_TMP/repo"
 create_repo "$REPO_DIR"
 
+# Create an additional worktree so wt hub shows FZF picker
+WORKTREE_DIR="$TEST_TMP/repo-feature"
+add_worktree_branch "$REPO_DIR" "$WORKTREE_DIR" "feature/test" HEAD
+
 # Isolate HOME so we don't touch the user's config
 export HOME="$TEST_TMP/home"
 mkdir -p "$HOME"
@@ -30,7 +34,7 @@ mkdir -p "$HOME"
 cd "$REPO_DIR"
 
 CFG_DIR="$HOME/.config/git-worktrees"
-CFG_FILE="$CFG_DIR/hub"
+CFG_FILE="$CFG_DIR/config"  # Modern config location (not legacy 'hub')
 rm -rf "$CFG_DIR" || true
 
 # Replace fzf with a custom 2-step stub: 1) ctrl-e on a row, 2) cancel
@@ -57,7 +61,7 @@ wt --start list
 set -e
 
 assert_file_exists "$CFG_FILE"
-assert_contains "$CFG_FILE" "ENTER_DEFAULT=menu"
+assert_contains "$CFG_FILE" "WT_ENTER_BEHAVIOR=menu"
 
 # Reset and toggle back to open
 rm -f "$TEST_TMP/fzf_ctrl_e_count"
@@ -83,6 +87,6 @@ set +e
 wt --start list
 set -e
 
-assert_contains "$CFG_FILE" "ENTER_DEFAULT=open"
+assert_contains "$CFG_FILE" "WT_ENTER_BEHAVIOR=open"
 
 echo "wt ctrl-e persist test OK"

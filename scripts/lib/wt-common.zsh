@@ -321,9 +321,9 @@ wt_find_default_branch() {
 wt_is_worktree_dirty() {
   emulate -L zsh
   local dir="$1"
-  local status
-  status="$(git -C "$dir" status --porcelain --untracked-files=all 2>/dev/null)"
-  [[ -n "$status" ]]
+  local git_status
+  git_status="$(git -C "$dir" status --porcelain --untracked-files=all 2>/dev/null)"
+  [[ -n "$git_status" ]]
 }
 
 # Get worktree status (porcelain output)
@@ -452,7 +452,7 @@ wt_msg_success() {
 # Usage: wt_msg_info "message"
 wt_msg_info() {
   emulate -L zsh
-  echo "ℹ️  $1"
+  echo "ℹ️  $1" >&2  # Info messages go to stderr for clean stdout capture
 }
 
 # Print a status/progress message
@@ -1019,6 +1019,63 @@ wt_parse_bool() {
   esac
 }
 
+# ----------------------
+# Non-Interactive Mode Support
+# ----------------------
+
+# Check if running in interactive mode
+# Returns: 0 if interactive, 1 if non-interactive (batch/test mode)
+# Non-interactive when:
+#   - WT_NON_INTERACTIVE is set (explicit test/batch mode)
+#   - CI environment detected
+# Note: We don't check -t 0 (stdin is tty) because some tests pipe valid input
+wt_is_interactive() {
+  emulate -L zsh
+  [[ -z "${WT_NON_INTERACTIVE:-}" && -z "${CI:-}" ]]
+}
+
+# Prompt for a numbered choice, fail in non-interactive mode
+# Usage: wt_prompt_choice "prompt" max_choice [default]
+# Sets REPLY to choice number
+# Returns: 0 on success, 1 if non-interactive without default
+wt_prompt_choice() {
+  emulate -L zsh
+  local prompt="$1" max="$2" default="${3:-}"
+  
+  if wt_is_interactive; then
+    printf "%s" "$prompt"
+    read -r REPLY
+    return 0
+  elif [[ -n "$default" ]]; then
+    REPLY="$default"
+    return 0
+  else
+    return 1  # Signal non-interactive failure
+  fi
+}
+
+# Yes/No confirmation, fail in non-interactive mode
+# Usage: wt_confirm "prompt" [default: y|n]
+# Returns: 0 for yes, 1 for no or non-interactive
+wt_confirm() {
+  emulate -L zsh
+  local prompt="$1" default="${2:-n}"
+  
+  if wt_is_interactive; then
+    printf "%s" "$prompt"
+    read -r REPLY
+    [[ "${REPLY:l}" == "y"* ]]
+  elif [[ "${default:l}" == "y"* ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# ----------------------
+# Validation Utilities
+# ----------------------
+
 # Validate a value is one of allowed options
 # Usage: wt_validate_option "value" "opt1" "opt2" ...
 # Returns: 0 if valid, 1 if invalid (prints error)
@@ -1071,41 +1128,205 @@ wt_fetch_remotes_safe() {
 # Editor Selection Menu
 # ----------------------
 
-# Display editor selection menu and return choice
+# Known editors with their detection methods
+# Format: "Name|macOS app name|CLI command"
+# Sorted alphabetically (case-insensitive) - Android Studio first
+typeset -ga WT_KNOWN_EDITORS=(
+  "Android Studio|Android Studio|studio"
+  "Cursor|Cursor|cursor"
+  "Emacs||emacs"
+  "Fleet|Fleet|fleet"
+  "GoLand|GoLand|goland"
+  "Helix||hx"
+  "IntelliJ IDEA|IntelliJ IDEA|idea"
+  "IntelliJ IDEA CE|IntelliJ IDEA CE|idea"
+  "MacVim|MacVim|mvim"
+  "Neovim||nvim"
+  "PyCharm|PyCharm|pycharm"
+  "RustRover|RustRover|rustrover"
+  "Sublime Text|Sublime Text|subl"
+  "TextMate|TextMate|mate"
+  "Vim||vim"
+  "Visual Studio Code|Visual Studio Code|code"
+  "WebStorm|WebStorm|webstorm"
+  "Zed|Zed|zed"
+)
+
+# Check if a specific editor is installed
+# Usage: wt_is_editor_installed "Visual Studio Code"
+# Returns: 0 if installed, 1 if not
+wt_is_editor_installed() {
+  emulate -L zsh
+  local name="$1"
+  local entry mac_app cli_cmd
+  
+  for entry in "${WT_KNOWN_EDITORS[@]}"; do
+    local editor_name="${entry%%|*}"
+    # Case-insensitive comparison for known editors
+    if [[ "${editor_name:l}" == "${name:l}" ]]; then
+      local rest="${entry#*|}"
+      mac_app="${rest%%|*}"
+      cli_cmd="${rest#*|}"
+      
+      # Check macOS app
+      if [[ -n "$mac_app" && -d "/Applications/${mac_app}.app" ]]; then
+        return 0
+      fi
+      # Check CLI command
+      if [[ -n "$cli_cmd" ]] && command -v "$cli_cmd" >/dev/null 2>&1; then
+        return 0
+      fi
+      return 1
+    fi
+  done
+  
+  # Unknown editor - check if it's a command
+  if command -v "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+# Get list of installed editors
+# Usage: installed=($(wt_get_installed_editors))
+# Returns: newline-separated list of installed editor names
+wt_get_installed_editors() {
+  emulate -L zsh
+  local entry editor_name rest mac_app cli_cmd
+  local -a installed
+  
+  for entry in "${WT_KNOWN_EDITORS[@]}"; do
+    editor_name="${entry%%|*}"
+    rest="${entry#*|}"
+    mac_app="${rest%%|*}"
+    cli_cmd="${rest#*|}"
+    
+    # Check macOS app
+    if [[ -n "$mac_app" && -d "/Applications/${mac_app}.app" ]]; then
+      installed+=("$editor_name")
+      continue
+    fi
+    # Check CLI command
+    if [[ -n "$cli_cmd" ]] && command -v "$cli_cmd" >/dev/null 2>&1; then
+      installed+=("$editor_name")
+    fi
+  done
+  
+  printf "%s\n" "${installed[@]}"
+}
+
+# Test if an editor command works
+# Usage: wt_test_editor "code"
+# Returns: 0 if works, 1 if not
+wt_test_editor() {
+  emulate -L zsh
+  local editor="$1"
+  
+  # For known editors, check installation
+  if wt_is_editor_installed "$editor"; then
+    return 0
+  fi
+  
+  # For arbitrary commands, check if command exists
+  local cmd="${editor%% *}"  # Get first word (command without args)
+  if command -v "$cmd" >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  return 1
+}
+
+# Display smart editor selection menu (shows only installed editors)
 # Usage: selected=$(wt_editor_selection_menu)
-# Returns: Editor name or "none" on stdout, empty on cancel
-# Note: Menu prompts go to stderr, only result goes to stdout
+# Returns: Editor name, "auto", "none", or custom command on stdout; empty on cancel
 wt_editor_selection_menu() {
   emulate -L zsh
+  local -a installed
+  local line i=0
+  
+  # Get installed editors
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && installed+=("$line")
+  done < <(wt_get_installed_editors)
+  
+  # Use FZF if available and we have multiple options
+  if wt_has_fzf && (( ${#installed[@]} > 0 )); then
+    local options=""
+    for editor in "${installed[@]}"; do
+      options+="$editor (installed)"$'\n'
+    done
+    options+="Auto-detect"$'\n'
+    options+="Custom command..."$'\n'
+    options+="None (show path only)"
+    
+    local selection
+    selection="$(printf "%s" "$options" | FZF_DEFAULT_OPTS= command fzf \
+      --prompt="📂 Select editor: " \
+      --height=${WT_FZF_HEIGHT:-40%} \
+      --reverse \
+      ${WT_FZF_OPTS:-})" || return 1
+    
+    case "$selection" in
+      "Auto-detect") echo "auto" ;;
+      "Custom command..."*)
+        printf "Enter command (e.g., 'code --new-window'): " >&2
+        local custom
+        read -r custom
+        [[ -n "$custom" ]] && echo "$custom" || return 1
+        ;;
+      "None (show path only)") echo "none" ;;
+      *" (installed)") echo "${selection% (installed)}" ;;
+      *) echo "$selection" ;;
+    esac
+    return 0
+  fi
+  
+  # Fallback to numbered menu
   echo "" >&2
   echo "📂 Choose your default editor:" >&2
-  echo "  1) Android Studio" >&2
-  echo "  2) Visual Studio Code" >&2
-  echo "  3) Cursor" >&2
-  echo "  4) IntelliJ IDEA" >&2
-  echo "  5) PyCharm" >&2
-  echo "  6) WebStorm" >&2
-  echo "  7) Sublime Text" >&2
-  echo "  8) vim" >&2
-  echo "  9) Don't auto-open (show path only)" >&2
   echo "" >&2
-  printf "Choice [1-9]: " >&2
+  
+  # Show installed editors first
+  local -A choice_map
+  i=1
+  if (( ${#installed[@]} > 0 )); then
+    echo "  Installed:" >&2
+    for editor in "${installed[@]}"; do
+      echo "  $i) $editor" >&2
+      choice_map[$i]="$editor"
+      ((i++))
+    done
+    echo "" >&2
+  fi
+  
+  # Special options
+  local auto_idx=$i; ((i++))
+  local custom_idx=$i; ((i++))
+  local none_idx=$i
+  
+  echo "  $auto_idx) Auto-detect" >&2
+  echo "  $custom_idx) Custom command..." >&2
+  echo "  $none_idx) None (show path only)" >&2
+  echo "" >&2
+  printf "Choice [1-$none_idx]: " >&2
   
   local choice
   read -r choice
   
-  case "$choice" in
-    1) echo "Android Studio" ;;
-    2) echo "Visual Studio Code" ;;
-    3) echo "Cursor" ;;
-    4) echo "IntelliJ IDEA" ;;
-    5) echo "PyCharm" ;;
-    6) echo "WebStorm" ;;
-    7) echo "Sublime Text" ;;
-    8) echo "vim" ;;
-    9) echo "none" ;;
-    *) return 1 ;;
-  esac
+  if [[ "$choice" == "$auto_idx" ]]; then
+    echo "auto"
+  elif [[ "$choice" == "$custom_idx" ]]; then
+    printf "Enter command (e.g., 'code --new-window'): " >&2
+    local custom
+    read -r custom
+    [[ -n "$custom" ]] && echo "$custom" || return 1
+  elif [[ "$choice" == "$none_idx" ]]; then
+    echo "none"
+  elif [[ -n "${choice_map[$choice]:-}" ]]; then
+    echo "${choice_map[$choice]}"
+  else
+    return 1
+  fi
 }
 
 # Prompt user to select editor and save to config
@@ -1117,8 +1338,31 @@ wt_change_editor_interactive() {
   selected="$(wt_editor_selection_menu)"
   
   if [[ -z "$selected" ]]; then
-    echo "⚠️  Invalid choice"
+    echo "⚠️  Cancelled"
     return 1
+  fi
+  
+  # Handle auto-detect
+  if [[ "$selected" == "auto" ]]; then
+    local detected
+    detected="$(wt_detect_editor)"
+    if [[ -n "$detected" ]]; then
+      echo "🔍 Auto-detected: $detected"
+      selected="$detected"
+    else
+      echo "⚠️  No editor detected, using 'none'"
+      selected="none"
+    fi
+  fi
+  
+  # Test the editor before saving (unless it's 'none' or 'auto')
+  if [[ "$selected" != "none" ]]; then
+    echo -n "Testing $selected... " >&2
+    if wt_test_editor "$selected"; then
+      echo "✅" >&2
+    else
+      echo "⚠️  Not found (saving anyway)" >&2
+    fi
   fi
   
   # Save to config
@@ -1194,6 +1438,110 @@ wt_shell_command() {
     fi
   done
   printf "%s" "$cmd"
+}
+
+# ----------------------
+# Cross-Platform Clipboard
+# ----------------------
+
+# Copy text to system clipboard (cross-platform)
+# Usage: wt_copy_to_clipboard "text to copy"
+# Returns: 0 on success, 1 if no clipboard tool available
+wt_copy_to_clipboard() {
+  emulate -L zsh
+  local text="$1"
+  
+  if command -v pbcopy >/dev/null 2>&1; then
+    # macOS
+    printf "%s" "$text" | pbcopy
+    return 0
+  elif command -v xclip >/dev/null 2>&1; then
+    # Linux with X11
+    printf "%s" "$text" | xclip -selection clipboard
+    return 0
+  elif command -v xsel >/dev/null 2>&1; then
+    # Linux with X11 (alternative)
+    printf "%s" "$text" | xsel --clipboard --input
+    return 0
+  elif command -v wl-copy >/dev/null 2>&1; then
+    # Wayland
+    printf "%s" "$text" | wl-copy
+    return 0
+  fi
+  
+  # No clipboard tool available
+  return 1
+}
+
+# ----------------------
+# Cross-Platform Terminal
+# ----------------------
+
+# Open a directory in a new terminal window (cross-platform)
+# Usage: wt_open_in_terminal "/path/to/dir"
+# Returns: 0 on success, 1 on failure
+wt_open_in_terminal() {
+  emulate -L zsh
+  local dir="$1"
+  local term_app="${WT_TERMINAL_APP:-}"
+  
+  if [[ "$OSTYPE" == darwin* ]]; then
+    # macOS
+    [[ -z "$term_app" ]] && term_app="iTerm"
+    if open -a "$term_app" "$dir" >/dev/null 2>&1; then
+      return 0
+    elif open -a "Terminal" "$dir" >/dev/null 2>&1; then
+      return 0
+    else
+      wt_msg_error "Could not open terminal"
+      return 1
+    fi
+  else
+    # Linux - try common terminals
+    if [[ -n "$term_app" ]]; then
+      # Validate custom terminal command exists
+      if ! command -v "$term_app" >/dev/null 2>&1; then
+        wt_msg_error "Terminal '$term_app' not found"
+        echo "   Check WT_TERMINAL_APP setting or install the terminal" >&2
+        return 1
+      fi
+      # Detect terminal type and use appropriate flags
+      # Note: background processes always "succeed" at fork, so we can only
+      # validate the command exists, not that the window actually opened
+      case "$term_app" in
+        *konsole*)
+          "$term_app" --workdir "$dir" &>/dev/null &
+          ;;
+        *xterm*)
+          "$term_app" -e "cd $(wt_shell_quote "$dir") && exec \$SHELL" &>/dev/null &
+          ;;
+        *alacritty*)
+          "$term_app" --working-directory "$dir" &>/dev/null &
+          ;;
+        *)
+          # Most terminals support --working-directory
+          "$term_app" --working-directory="$dir" &>/dev/null &
+          ;;
+      esac
+      return 0
+    elif command -v gnome-terminal >/dev/null 2>&1; then
+      gnome-terminal --working-directory="$dir" &>/dev/null &
+      return 0
+    elif command -v konsole >/dev/null 2>&1; then
+      konsole --workdir "$dir" &>/dev/null &
+      return 0
+    elif command -v xfce4-terminal >/dev/null 2>&1; then
+      xfce4-terminal --working-directory="$dir" &>/dev/null &
+      return 0
+    elif command -v xterm >/dev/null 2>&1; then
+      xterm -e "cd $(wt_shell_quote "$dir") && exec \$SHELL" &>/dev/null &
+      return 0
+    else
+      wt_msg_error "No terminal emulator found"
+      echo "   Set WT_TERMINAL_APP to your terminal command" >&2
+      return 1
+    fi
+  fi
 }
 
 # ----------------------
@@ -1303,7 +1651,7 @@ ERROR
 # ============================================================================
 
 # Detect the best editor/IDE to use
-# Priority: WT_EDITOR > WT_APP > VISUAL > EDITOR > GUI detection > fallback
+# Priority: WT_EDITOR > WT_APP > config > VISUAL > EDITOR > GUI detection > fallback
 # Returns: editor name (e.g. "Visual Studio Code", "vim") or empty
 wt_detect_editor() {
   emulate -L zsh
@@ -1320,7 +1668,22 @@ wt_detect_editor() {
     return 0
   fi
   
-  # 2. Standard environment variables
+  # 2. Check saved config (before env vars, user explicitly chose this)
+  local config_file="$(wt_config_file 2>/dev/null)" || config_file=""
+  if [[ -n "$config_file" && -f "$config_file" ]]; then
+    local saved_editor
+    saved_editor="$(grep "^editor=" "$config_file" 2>/dev/null | cut -d= -f2-)"
+    if [[ -n "$saved_editor" && "$saved_editor" != "none" && "$saved_editor" != "auto" ]]; then
+      echo "$saved_editor"
+      return 0
+    fi
+    # If explicitly set to "none", return empty
+    if [[ "$saved_editor" == "none" ]]; then
+      return 1
+    fi
+  fi
+  
+  # 3. Standard environment variables
   if [[ -n ${VISUAL:-} ]]; then
     echo "$VISUAL"
     return 0
@@ -1331,21 +1694,23 @@ wt_detect_editor() {
     return 0
   fi
   
-  # 3. Detect common GUI editors on macOS
+  # 4. Detect GUI editors on macOS (alphabetical, Android Studio first)
   if [[ "$OSTYPE" == darwin* ]]; then
     local gui_editors=(
-      "Visual Studio Code"
-      "Code"
+      "Android Studio"
       "Cursor"
+      "Fleet"
+      "GoLand"
       "IntelliJ IDEA"
       "IntelliJ IDEA CE"
-      "PyCharm"
-      "WebStorm"
-      "Android Studio"
-      "Sublime Text"
-      "Atom"
-      "TextMate"
       "MacVim"
+      "PyCharm"
+      "RustRover"
+      "Sublime Text"
+      "TextMate"
+      "Visual Studio Code"
+      "WebStorm"
+      "Zed"
     )
     
     for editor in "${gui_editors[@]}"; do
@@ -1356,138 +1721,106 @@ wt_detect_editor() {
     done
   fi
   
-  # 4. Check for command-line editors
-  local cli_editors=(code cursor idea pycharm webstorm vim nvim emacs nano)
+  # 5. Check for command-line editors (alphabetical)
+  local cli_editors=(cursor code emacs fleet goland hx idea mvim nvim pycharm rustrover studio subl vim webstorm zed)
   for cmd in "${cli_editors[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
-      echo "$cmd"
+      # Map CLI command back to friendly name
+      case "$cmd" in
+        studio) echo "Android Studio" ;;
+        hx) echo "Helix" ;;
+        mvim) echo "MacVim" ;;
+        nvim) echo "Neovim" ;;
+        subl) echo "Sublime Text" ;;
+        code) echo "Visual Studio Code" ;;
+        *) echo "$cmd" ;;
+      esac
       return 0
     fi
   done
   
-  # 5. No editor found
+  # 6. No editor found
   echo ""
   return 1
 }
 
-# First-run editor setup (one time only)
-# Shows interactive menu and saves preference
+# Initialize config with auto-detected editor (non-blocking)
+# Called automatically on first use - no user interaction
+wt_auto_init_config() {
+  emulate -L zsh
+  setopt local_options pipefail
+  
+  local config_dir="$(wt_config_dir)"
+  local config_file="$(wt_config_file)"
+  
+  # Already initialized
+  [[ -f "$config_file" ]] && return 0
+  
+  mkdir -p "$config_dir" 2>/dev/null || return 1
+  
+  # Auto-detect editor
+  local detected="auto"  # Let wt_detect_editor handle it dynamically
+  
+  # Create config
+  cat > "$config_file" <<EOF
+# git-worktrees configuration
+# Editor: 'auto' means auto-detect, or set to specific editor name
+# Run 'wt config set editor "Editor Name"' to change
+editor=${detected}
+behavior.autoopen=true
+EOF
+  
+  return 0
+}
+
+# First-run editor setup - now just shows a one-time tip
+# No blocking prompt - uses auto-detection by default
 wt_first_run_editor_setup() {
   emulate -L zsh
   setopt local_options pipefail
   
-  # Handle interrupt gracefully - use auto-detection if user cancels
-  local _interrupted=0
-  trap '_interrupted=1' INT
+  # Initialize config silently
+  wt_auto_init_config
   
-  echo "" >&2
-  echo "👋 Welcome to git-worktrees!" >&2
-  echo "" >&2
-  echo "📂 Choose your default editor:" >&2
-  echo "  1) Android Studio" >&2
-  echo "  2) Visual Studio Code" >&2
-  echo "  3) Cursor" >&2
-  echo "  4) IntelliJ IDEA" >&2
-  echo "  5) PyCharm" >&2
-  echo "  6) WebStorm" >&2
-  echo "  7) Sublime Text" >&2
-  echo "  8) vim" >&2
-  echo "  9) Don't auto-open (show path only)" >&2
-  echo "" >&2
-  printf "Choice [1-9]: " >&2
+  # Detect and return editor (no prompt)
+  local detected
+  detected="$(wt_detect_editor)"
   
-  local choice
-  read -r choice || _interrupted=1
-  
-  # Handle Ctrl-C: fall back to auto-detection
-  if (( _interrupted )); then
-    echo "" >&2
-    echo "⚠️  Setup interrupted. Using auto-detection." >&2
-    trap - INT
-    local detected
-    detected="$(wt_detect_editor 2>/dev/null)" || detected=""
-    [[ -n "$detected" ]] && echo "$detected"
+  # Show one-time tip (only if we found an editor)
+  if [[ -n "$detected" ]]; then
+    # Check if we've shown the tip before
+    local config_file="$(wt_config_file)"
+    if ! grep -q "^tip_shown=true" "$config_file" 2>/dev/null; then
+      echo "" >&2
+      echo "🔍 Using $detected (auto-detected)" >&2
+      echo "💡 Change anytime: wt config set editor \"Other Editor\"" >&2
+      echo "" >&2
+      # Mark tip as shown
+      echo "tip_shown=true" >> "$config_file" 2>/dev/null || true
+    fi
+    echo "$detected"
     return 0
   fi
   
-  local selected=""
-  case "$choice" in
-    1) selected="Android Studio" ;;
-    2) selected="Visual Studio Code" ;;
-    3) selected="Cursor" ;;
-    4) selected="IntelliJ IDEA" ;;
-    5) selected="PyCharm" ;;
-    6) selected="WebStorm" ;;
-    7) selected="Sublime Text" ;;
-    8) selected="vim" ;;
-    9) selected="none" ;;
-    *) 
-      echo "" >&2
-      echo "⚠️  Invalid choice. Using auto-detection." >&2
-      selected="auto"
-      ;;
-  esac
-  
-  # Save to config
-  local config_dir="$(wt_config_dir)"
-  local config_file="$(wt_config_file)"
-  mkdir -p "$config_dir"
-  
-  if [[ "$selected" == "auto" ]]; then
-    # Try to detect
-    selected="$(wt_detect_editor)"
-    [[ -z "$selected" ]] && selected="none"
-  fi
-  
-  # Create config with choice
-  if typeset -f wt_init_config >/dev/null 2>&1; then
-    wt_init_config >/dev/null 2>&1
-    if [[ -f "$config_file" ]]; then
-      wt_sed_i "s|^editor=.*|editor=${selected}|" "$config_file"
-    fi
-  else
-    cat > "$config_file" <<EOF
-# git-worktrees configuration
-editor=${selected}
-behavior.autoopen=true
-behavior.editor_prompt=silent
-EOF
-  fi
-  
-  echo "" >&2
-  if [[ "$selected" == "none" ]]; then
-    echo "✅ Configured: Show path only (no auto-open)" >&2
-  else
-    echo "✅ Saved: $selected" >&2
-  fi
-  echo "" >&2
-  echo "  You can change this anytime:" >&2
-  echo "    wt config edit" >&2
-  echo "    wt config set editor \"Different Editor\"" >&2
-  echo "    export WT_EDITOR=\"Different Editor\"" >&2
-  echo "" >&2
-  printf "Press Enter to continue... " >&2
-  read -r || true  # Ignore Ctrl-C on final prompt
-  
-  trap - INT  # Reset interrupt handler
-  [[ "$selected" != "none" ]] && echo "$selected"
-  return 0
+  # No editor found
+  return 1
 }
 
 # Get the editor/app to use
-# Returns: editor name or empty (if user chose "none")
+# Returns: editor name or empty (if user chose "none" or nothing found)
+# Non-blocking: auto-detects on first run without prompting
 wt_get_editor() {
   emulate -L zsh
   setopt local_options pipefail
   
-  # Check if first run needed
+  # Ensure config exists (non-blocking)
   local config_file="$(wt_config_file)"
   if [[ ! -f "$config_file" ]]; then
     wt_first_run_editor_setup
     return $?
   fi
   
-  # Load from config or detect
+  # Use wt_detect_editor which checks config, env vars, and auto-detects
   local detected
   detected="$(wt_detect_editor)"
   

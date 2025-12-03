@@ -265,7 +265,14 @@ wt_offer_recovery() {
 # ============================================================================
 
 # Session state directory - computed on demand via function
+# Can be overridden with WT_SESSION_DIR env var (useful for testing)
 wt_session_dir() {
+  # Allow test override
+  if [[ -n "${WT_SESSION_DIR:-}" ]]; then
+    printf "%s" "$WT_SESSION_DIR"
+    return
+  fi
+  
   local cache_dir
   if typeset -f wt_cache_dir >/dev/null 2>&1; then
     cache_dir="$(wt_cache_dir)"
@@ -405,7 +412,15 @@ wt_offer_resume() {
 # ============================================================================
 
 # Transaction log path - computed on demand via function
+# Get transaction log path
+# Can be overridden with WT_TRANSACTION_LOG env var (useful for testing)
 wt_transaction_log() {
+  # Allow test override
+  if [[ -n "${WT_TRANSACTION_LOG:-}" ]]; then
+    printf "%s" "$WT_TRANSACTION_LOG"
+    return
+  fi
+  
   local cache_dir
   if typeset -f wt_cache_dir >/dev/null 2>&1; then
     cache_dir="$(wt_cache_dir)"
