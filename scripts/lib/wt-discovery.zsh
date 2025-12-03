@@ -1,6 +1,10 @@
 #!/usr/bin/env zsh
 # wt-discovery.zsh - Help system and feature discovery
 # Part of Phase 1: Core Infrastructure
+#
+# NOTE: This module avoids heredocs inside case statements due to a zsh parsing
+# bug that corrupts heredoc content when a `local` declaration precedes an
+# unquoted heredoc. We use multi-line string assignments instead.
 
 emulate -L zsh
 setopt local_options pipefail
@@ -14,42 +18,33 @@ unsetopt xtrace verbose
 # Usage: wt_show_contextual_help <context> [details...]
 wt_show_contextual_help() {
   local context="$1"; shift
+  local msg=""
   
   case "$context" in
     branch_selection)
-      cat <<'EOF'
-💡 Branch Selection Tips:
+      msg="💡 Branch Selection Tips:
    • Type to filter branches fuzzy-find style
    • ↑↓ or Ctrl-J/K to navigate
    • Enter to select
    • Esc to cancel
-   • Type a new name to create a new branch
-EOF
+   • Type a new name to create a new branch"
       ;;
-      
     worktree_creation)
-      cat <<'EOF'
-💡 Creating Worktree:
+      msg="💡 Creating Worktree:
    • Branch name will be sanitized automatically
    • Use slashes for organization: feature/my-branch
    • Use --push to set upstream automatically
-   • Use --start to set as default starting directory
-EOF
+   • Use --start to set as default starting directory"
       ;;
-      
     worktree_removal)
-      cat <<'EOF'
-💡 Removing Worktree:
+      msg="💡 Removing Worktree:
    • Safe by default: won't delete uncommitted work
    • Use --force to override safety checks
    • Branch is NOT deleted by default
-   • Use --delete-branch to also remove the branch
-EOF
+   • Use --delete-branch to also remove the branch"
       ;;
-      
     fzf_shortcuts)
-      cat <<'EOF'
-⌨️  Keyboard Shortcuts (wt hub):
+      msg="⌨️  Keyboard Shortcuts (wt hub):
    • Enter:   Open worktree (or actions menu if toggled)
    • Ctrl-O:  Open worktree in editor
    • Ctrl-N:  Create new worktree
@@ -59,159 +54,144 @@ EOF
    • Ctrl-A:  Actions menu (open, copy, remove, etc.)
    • Ctrl-E:  Toggle Enter behavior (open ↔ menu)
    • Ctrl-H:  Show help
-   • Esc:     Cancel/exit
-EOF
+   • Esc:     Cancel/exit"
       ;;
-      
     error_recovery)
-      cat <<'EOF'
-💡 Error Recovery:
+      msg="💡 Error Recovery:
    • Don't panic! You have options:
    • Most errors offer retry with corrections
    • Session state is saved for recovery
    • Failed operations can be rolled back
-   • Use ESC or Ctrl-C to cancel safely
-EOF
+   • Use ESC or Ctrl-C to cancel safely"
       ;;
-      
     *)
       echo "No contextual help available for: $context"
       return 1
       ;;
   esac
+  
+  [[ -n "$msg" ]] && print -r -- "$msg"
 }
 
 # Show command examples
 # Usage: wt_show_examples <command>
 wt_show_examples() {
   local cmd="$1"
+  local msg=""
   
   case "$cmd" in
     wt)
-      cat <<'EOF'
-📖 wt Examples:
+      msg="📖 wt Examples:
 
   # Interactive fuzzy selection
-  $ wt
+  \$ wt
   
   # Quick open by name
-  $ wt feature/my-branch
+  \$ wt feature/my-branch
   
   # Create new worktree (subcommand)
-  $ wt new feature/test
+  \$ wt new feature/test
   
   # List all worktrees
-  $ wt list
+  \$ wt list
   
   # Remove worktree
-  $ wt remove feature/old
+  \$ wt remove feature/old
   
   # Open in specific editor
-  $ WT_EDITOR=code wt feature/ui
+  \$ WT_EDITOR=code wt feature/ui
   
   # Start in branch-first mode
-  $ wt --start new
-EOF
+  \$ wt --start new"
       ;;
-      
     wtnew)
-      cat <<'EOF'
-📖 wtnew Examples:
+      msg="📖 wtnew Examples:
 
   # Create from current branch
-  $ wtnew feature/new-feature
+  \$ wtnew feature/new-feature
   
   # Create from specific base
-  $ wtnew feature/new -b main
+  \$ wtnew feature/new -b main
   
   # Create and set upstream
-  $ wtnew feature/new --push
+  \$ wtnew feature/new --push
   
   # Prefer reusing existing worktree slot
-  $ wtnew feature/existing --prefer-reuse
+  \$ wtnew feature/existing --prefer-reuse
   
   # Custom worktree directory
-  $ wtnew feature/new -d /custom/path
+  \$ wtnew feature/new -d /custom/path
   
   # Using flags explicitly
-  $ wtnew -n feature/new -b origin/main --push
-EOF
+  \$ wtnew -n feature/new -b origin/main --push"
       ;;
-      
     wtrm)
-      cat <<'EOF'
-📖 wtrm Examples:
+      msg="📖 wtrm Examples:
 
   # Interactive removal
-  $ wtrm
+  \$ wtrm
   
   # Remove specific worktree
-  $ wtrm feature/old
+  \$ wtrm feature/old
   
   # Remove and delete branch
-  $ wtrm feature/old --delete-branch
+  \$ wtrm feature/old --delete-branch
   
   # Force removal (skip safety checks)
-  $ wtrm feature/broken --force
+  \$ wtrm feature/broken --force
   
   # Dry run to see what would be removed
-  $ wtrm --dry-run
+  \$ wtrm --dry-run
   
   # Remove multiple worktrees
-  $ wtrm feature/a feature/b feature/c
-EOF
+  \$ wtrm feature/a feature/b feature/c"
       ;;
-      
     wtopen)
-      cat <<'EOF'
-📖 wtopen Examples:
+      msg="📖 wtopen Examples:
 
   # Open in default editor
-  $ wtopen feature/my-branch
+  \$ wtopen feature/my-branch
   
   # Open in specific editor
-  $ EDITOR=code wtopen feature/ui
+  \$ EDITOR=code wtopen feature/ui
   
   # Open at exact path
-  $ wtopen /path/to/worktree
+  \$ wtopen /path/to/worktree
   
   # Open with custom cd (bash)
-  $ . wtopen feature/test
+  \$ . wtopen feature/test
   
   # Prune stale worktrees first
-  $ wtopen --prune feature/branch
-EOF
+  \$ wtopen --prune feature/branch"
       ;;
-      
     wtls)
-      cat <<'EOF'
-📖 wtls Examples:
+      msg="📖 wtls Examples:
 
   # List all worktrees
-  $ wtls
+  \$ wtls
   
   # Interactive FZF selection
-  $ wtls --fzf
+  \$ wtls --fzf
   
   # Show ahead/behind status
-  $ wtls --status
+  \$ wtls --status
   
   # Compact format
-  $ wtls --compact
+  \$ wtls --compact
   
   # JSON output
-  $ wtls --json
+  \$ wtls --json
   
   # Filter by pattern
-  $ wtls | grep feature/
-EOF
+  \$ wtls | grep feature/"
       ;;
-      
     *)
       echo "No examples available for: $cmd"
       return 1
       ;;
   esac
+  
+  [[ -n "$msg" ]] && print -r -- "$msg"
 }
 
 # ============================================================================
@@ -222,11 +202,11 @@ EOF
 # Usage: wt_show_hints <situation> [details...]
 wt_show_hints() {
   local situation="$1"; shift
+  local msg=""
   
   case "$situation" in
     first_time)
-      cat <<'EOF'
-👋 Welcome to git-worktrees!
+      msg="👋 Welcome to git-worktrees!
 
 Quick Start:
   1. Run 'wt' for interactive worktree hub
@@ -234,68 +214,56 @@ Quick Start:
   3. Use 'wt new' or 'wtnew' to create new worktrees
   4. Use 'wt remove' or 'wtrm' to remove worktrees
 
-💡 Tip: Run 'wt --tutorial' for a guided introduction
-EOF
+💡 Tip: Run 'wt --tutorial' for a guided introduction"
       ;;
-      
     no_worktrees)
-      cat <<'EOF'
-📝 No worktrees found besides main.
+      msg="📝 No worktrees found besides main.
 
 Create your first worktree:
-  $ wtnew feature/my-first-branch
+  \$ wtnew feature/my-first-branch
 
 Or create from specific base:
-  $ wtnew feature/my-branch -b develop
-EOF
+  \$ wtnew feature/my-branch -b develop"
       ;;
-      
     many_worktrees)
       local count="$1"
-      cat <<EOF
-📊 You have $count worktrees!
+      msg="📊 You have $count worktrees!
 
 Performance tips:
   • Use 'wt <pattern>' for quick filtering
   • Set WT_IGNORE_PATTERNS to hide certain branches
   • Consider cleaning up old worktrees with 'wtrm'
-  • Use 'wtls --status' to find stale branches
-EOF
+  • Use 'wtls --status' to find stale branches"
       ;;
-      
     outdated_branch)
       local branch="$1"
       local behind="$2"
-      cat <<EOF
-⚠️  Branch '$branch' is $behind commits behind!
+      msg="⚠️  Branch '$branch' is $behind commits behind!
 
 Update options:
   1. git pull (if safe)
   2. git fetch && git rebase
   3. Create fresh worktree from updated base
   
-Try: wt $branch && git pull
-EOF
+Try: wt $branch && git pull"
       ;;
-      
     untracked_changes)
       local path="$1"
-      cat <<EOF
-⚠️  Worktree has uncommitted changes: $path
+      msg="⚠️  Worktree has uncommitted changes: $path
 
 Options:
-  1. Commit changes: git commit -am "msg"
+  1. Commit changes: git commit -am \"msg\"
   2. Stash changes: git stash
   3. Create new worktree: wtnew feature/clean
   
-💡 wtrm will refuse to delete this worktree (safety)
-EOF
+💡 wtrm will refuse to delete this worktree (safety)"
       ;;
-      
     *)
       return 0  # No hints for this situation
       ;;
   esac
+  
+  [[ -n "$msg" ]] && print -r -- "$msg"
 }
 
 # ============================================================================
@@ -308,8 +276,7 @@ wt_cheatsheet() {
   local category="${1:-all}"
   
   if [[ "$category" == "all" ]] || [[ "$category" == "commands" ]]; then
-    cat <<'EOF'
-╔══════════════════════════════════════════════════════════════╗
+    print -r -- "╔══════════════════════════════════════════════════════════════╗
 ║                 git-worktrees CHEATSHEET                      ║
 ╚══════════════════════════════════════════════════════════════╝
 
@@ -322,23 +289,21 @@ CORE COMMANDS:
 
 COMMON WORKFLOWS:
   # Start new feature
-  $ wtnew feature/my-feature --push
+  \$ wtnew feature/my-feature --push
   
   # Quick switch
-  $ wt feature
+  \$ wt feature
   
   # Clean up old feature
-  $ wtrm feature/old --delete-branch
+  \$ wtrm feature/old --delete-branch
   
   # Review changes
-  $ wt feature && git diff main
-
-EOF
+  \$ wt feature && git diff main
+"
   fi
   
   if [[ "$category" == "all" ]] || [[ "$category" == "shortcuts" ]]; then
-    cat <<'EOF'
-KEYBOARD SHORTCUTS (wt hub):
+    print -r -- "KEYBOARD SHORTCUTS (wt hub):
   Enter       Open worktree (or menu if toggled)
   Ctrl-O      Open in editor
   Ctrl-N      Create new worktree
@@ -349,13 +314,11 @@ KEYBOARD SHORTCUTS (wt hub):
   Ctrl-E      Toggle Enter mode
   Ctrl-H      Show help
   Esc         Cancel
-
-EOF
+"
   fi
   
   if [[ "$category" == "all" ]] || [[ "$category" == "options" ]]; then
-    cat <<'EOF'
-COMMON OPTIONS:
+    print -r -- "COMMON OPTIONS:
   --help, -h             Show help
   -b, --base <branch>    Base branch for new worktree
   --push                 Set and push upstream
@@ -363,43 +326,38 @@ COMMON OPTIONS:
   --delete-branch        Also delete the branch
   --dry-run              Show what would happen
   --prefer-reuse         Reuse existing clean worktree slot
-
-EOF
+"
   fi
   
   if [[ "$category" == "all" ]] || [[ "$category" == "env" ]]; then
-    cat <<'EOF'
-ENVIRONMENT VARIABLES:
+    print -r -- "ENVIRONMENT VARIABLES:
   WT_EDITOR              Editor to use (overrides EDITOR)
   WT_APP                 Alias for WT_EDITOR
   WT_FZF_OPTS            Custom fzf options
   WT_FZF_HEIGHT          FZF height (default: 40%)
   WT_DEBUG               Enable debug output
   WT_NO_RECOVERY         Disable error recovery
-  WT_TERMINAL_APP        Terminal for "Open in terminal"
+  WT_TERMINAL_APP        Terminal for \"Open in terminal\"
   WTNEW_ALWAYS_PUSH      Always push new branches
   WTNEW_PREFER_REUSE     Prefer reusing worktree slots
-
-EOF
+"
   fi
   
   if [[ "$category" == "all" ]] || [[ "$category" == "tips" ]]; then
-    cat <<'EOF'
-PRO TIPS:
+    print -r -- "PRO TIPS:
   • Prefix branch names with category: feature/, fix/, docs/
   • Use --prefer-reuse to avoid duplicate worktrees
   • Run 'wt list' or 'wtls' to see all worktrees
   • Use Ctrl-A in hub for quick actions menu
   • Use Ctrl-E to toggle Enter between open/menu mode
-  • Configure editor once: wt config set editor "Cursor"
+  • Configure editor once: wt config set editor \"Cursor\"
 
 LEARN MORE:
-  $ wt --help
-  $ wt --tutorial
-  $ wtnew --help
-  $ man git-worktree
-
-EOF
+  \$ wt --help
+  \$ wt --tutorial
+  \$ wtnew --help
+  \$ man git-worktree
+"
   fi
   
   if [[ "$category" != "all" ]] && [[ "$category" != "commands" ]] && \
@@ -418,8 +376,7 @@ EOF
 # Discover available features
 # Usage: wt_discover_features
 wt_discover_features() {
-  cat <<'EOF'
-🔍 Discovering git-worktrees features...
+  print -r -- "🔍 Discovering git-worktrees features...
 
 INTERACTIVE FEATURES:
   ✓ Fuzzy finding with fzf
@@ -449,8 +406,7 @@ CUSTOMIZATION:
   ✓ Editor integration
   ✓ Start directory management
 
-Run 'wt_cheatsheet' to see all commands and shortcuts!
-EOF
+Run 'wt_cheatsheet' to see all commands and shortcuts!"
 }
 
 # Check if feature is available
@@ -579,4 +535,3 @@ wt_help_interactive() {
   typeset -gf wt_has_feature wt_feature_status
   typeset -gf wt_help_interactive
 } >/dev/null 2>&1
-

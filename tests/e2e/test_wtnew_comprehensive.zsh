@@ -121,7 +121,9 @@ fi
 echo ""
 echo "Test 9: Branch name sanitization works"
 if typeset -f wt_sanitize_branch_name >/dev/null 2>&1; then
-  SANITIZED=$(wt_sanitize_branch_name "my bad@branch!")
+  # Test: spaces and @ are replaced with hyphens
+  # Note: ! is valid in git branch names, so it's preserved
+  SANITIZED=$(wt_sanitize_branch_name "my bad@branch")
   if [[ "$SANITIZED" == "my-bad-branch" ]]; then
     echo "  ✅ PASS: Branch sanitization works correctly"
   else
