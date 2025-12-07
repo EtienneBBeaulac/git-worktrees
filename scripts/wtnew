@@ -1,18 +1,8 @@
 # wtnew: create/open a Git worktree for a new or existing branch
-# macOS + zsh/bash friendly. Requires: git, (optional) fzf
+# Requires: git, (optional) fzf
 
-# Resolve script directory and source common helpers at load time (no subshell)
 emulate -L zsh
-setopt pipefail
-typeset -g WTNEW__SCRIPT_FILE WTNEW__SCRIPT_DIR WTNEW__COMMON_LIB
-WTNEW__SCRIPT_FILE=${(%):-%N}
-if [[ -n $WTNEW__SCRIPT_FILE && -f $WTNEW__SCRIPT_FILE ]]; then
-  WTNEW__SCRIPT_DIR="${WTNEW__SCRIPT_FILE:A:h}"
-else
-  WTNEW__SCRIPT_DIR="${0:A:h}"
-fi
-WTNEW__COMMON_LIB="${WTNEW__SCRIPT_DIR}/lib/wt-common.zsh"
-[[ -f "$WTNEW__COMMON_LIB" ]] && source "$WTNEW__COMMON_LIB" || true
+source "${${(%):-%x}:A:h}/lib/wt-common.zsh" || return 1
 
 wtnew() {
   emulate -L zsh

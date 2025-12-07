@@ -1,18 +1,14 @@
 #!/usr/bin/env zsh
-# Wrapper to run wtnew as a CLI when installed to PATH.
-# It sources the sibling ../wtnew function file and invokes wtnew.
+# Wrapper to run wtnew as a CLI command
+# Sources the sibling ../wtnew function file and invokes wtnew
 
-# Resolve this script's directory (zsh-specific):
 script_dir="${0:A:h}"
 script_root="${script_dir}/.."
 
-# Prefer function file next to the wrappers; fallback to absolute path if present.
 if [[ -f "${script_root}/wtnew" ]]; then
   source "${script_root}/wtnew"
-elif [[ -f "${script_root}/../wtnew" ]]; then
-  source "${script_root}/../wtnew"
 else
-  echo "wtnew function file not found. Expected at ${script_root}/wtnew" >&2
+  echo "Error: wtnew not found at ${script_root}/wtnew" >&2
   exit 2
 fi
 

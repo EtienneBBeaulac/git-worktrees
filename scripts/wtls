@@ -1,18 +1,9 @@
 # wtls: list Git worktrees with status, optional fzf picker
-# macOS + zsh/bash friendly. Requires: git, (optional) fzf
+# Requires: git, (optional) fzf
 
-# Resolve script directory and source common helpers at load time (no subshell)
 emulate -L zsh
-setopt pipefail
-typeset -g WTLS__SCRIPT_FILE WTLS__SCRIPT_DIR WTLS__COMMON_LIB
-WTLS__SCRIPT_FILE=${(%):-%N}
-if [[ -n $WTLS__SCRIPT_FILE && -f $WTLS__SCRIPT_FILE ]]; then
-  WTLS__SCRIPT_DIR="${WTLS__SCRIPT_FILE:A:h}"
-else
-  WTLS__SCRIPT_DIR="${0:A:h}"
-fi
-WTLS__COMMON_LIB="${WTLS__SCRIPT_DIR}/lib/wt-common.zsh"
-[[ -f "$WTLS__COMMON_LIB" ]] && source "$WTLS__COMMON_LIB" || true
+source "${${(%):-%x}:A:h}/lib/wt-common.zsh" || return 1
+
 wtls() {
   emulate -L zsh
   setopt local_options pipefail no_xtrace

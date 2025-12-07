@@ -1,21 +1,15 @@
 #!/usr/bin/env zsh
-# Wrapper to run wtls as a CLI when installed to PATH.
-# It sources the sibling ../wtls function file and invokes wtls.
+# Wrapper to run wtls as a CLI command
+# Sources the sibling ../wtls function file and invokes wtls
 
-# Resolve this script's directory (zsh-specific):
 script_dir="${0:A:h}"
 script_root="${script_dir}/.."
 
-# Prefer function file next to the wrappers; fallback to absolute path if present.
 if [[ -f "${script_root}/wtls" ]]; then
   source "${script_root}/wtls"
-elif [[ -f "${script_root}/../wtls" ]]; then
-  source "${script_root}/../wtls"
 else
-  echo "wtls function file not found. Expected at ${script_root}/wtls" >&2
+  echo "Error: wtls not found at ${script_root}/wtls" >&2
   exit 2
 fi
 
 wtls "$@"
-
-

@@ -12,28 +12,25 @@ class GitWorktrees < Formula
   uses_from_macos "zsh"
 
   def install
-    # Install library files to libexec
+    # Install main scripts to libexec
     libexec.install "scripts/wt"
     libexec.install "scripts/wtnew"
     libexec.install "scripts/wtrm"
     libexec.install "scripts/wtopen"
     libexec.install "scripts/wtls"
+    
+    # Install ALL library modules to libexec/lib (required, not optional)
     (libexec/"lib").install "scripts/lib/wt-common.zsh"
-    (libexec/"lib").install "scripts/lib/wt-discovery.zsh" if File.exist?("scripts/lib/wt-discovery.zsh")
-    (libexec/"lib").install "scripts/lib/wt-recovery.zsh" if File.exist?("scripts/lib/wt-recovery.zsh")
-    (libexec/"lib").install "scripts/lib/wt-validation.zsh" if File.exist?("scripts/lib/wt-validation.zsh")
+    (libexec/"lib").install "scripts/lib/wt-recovery.zsh"
+    (libexec/"lib").install "scripts/lib/wt-validation.zsh"
+    (libexec/"lib").install "scripts/lib/wt-discovery.zsh"
     
     # Create executable wrapper scripts in bin (automatically added to PATH)
+    # The scripts auto-discover their lib directory via ${(%):-%x}:A:h
     %w[wt wtnew wtrm wtopen wtls].each do |cmd|
       (bin/cmd).write <<~EOS
         #!/bin/zsh
         # Homebrew-installed git-worktrees
-        export WTRM__SCRIPT_DIR="#{libexec}"
-        export WTNEW__SCRIPT_DIR="#{libexec}"
-        export WTOPEN__SCRIPT_DIR="#{libexec}"
-        export WTLS__SCRIPT_DIR="#{libexec}"
-        export WT__SCRIPT_DIR="#{libexec}"
-        source "#{libexec}/lib/wt-common.zsh"
         source "#{libexec}/#{cmd}"
         #{cmd} "$@"
       EOS
@@ -64,7 +61,12 @@ class GitWorktrees < Formula
     system "zsh", "-n", libexec/"wtrm"
     system "zsh", "-n", libexec/"wtopen"
     system "zsh", "-n", libexec/"wtls"
+    
+    # Test all library modules exist and are valid
     system "zsh", "-n", libexec/"lib/wt-common.zsh"
+    system "zsh", "-n", libexec/"lib/wt-recovery.zsh"
+    system "zsh", "-n", libexec/"lib/wt-validation.zsh"
+    system "zsh", "-n", libexec/"lib/wt-discovery.zsh"
   end
 end
 

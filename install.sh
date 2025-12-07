@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PREFIX="${HOME}/.zsh/functions"
+# Install to a subdirectory to match source structure exactly
+PREFIX="${HOME}/.zsh/functions/git-worktrees"
 REPO_RAW_DEFAULT="https://raw.githubusercontent.com/EtienneBBeaulac/git-worktrees/main"
 REPO_RAW=${REPO_RAW:-"$REPO_RAW_DEFAULT"}
 
@@ -118,9 +119,6 @@ verify_checksums() {
     if [[ -z "$expected" ]]; then
       err "No checksum entry for $name"; ok=0; continue
     fi
-    if [[ -z "$expected" ]]; then
-      err "No checksum entry for $name"; ok=0; continue
-    fi
     if [[ "$hash" != "$expected" ]]; then
       err "Checksum mismatch for $name"; ok=0
     fi
@@ -129,10 +127,12 @@ verify_checksums() {
   return 0
 }
 
-say "Installing…"
+say "Installing to $PREFIX..."
 
-say "Ensuring directory: $PREFIX"
+# Create directory structure that matches source exactly
+say "Ensuring directories: $PREFIX and $PREFIX/lib"
 mkdir -p "$PREFIX"
+mkdir -p "$PREFIX/lib"
 
 fetch() {
   local src="$1" dst="$2"
@@ -164,22 +164,36 @@ fetch() {
   rm -f "$tmp" 2>/dev/null || true
 }
 
-F_WTNEW="$PREFIX/wtnew.zsh"
-F_WTRM="$PREFIX/wtrm.zsh"
-F_WTOPEN="$PREFIX/wtopen.zsh"
-F_WTLS="$PREFIX/wtls.zsh"
-F_COMMON="$PREFIX/wt-common.zsh"
-F_WT="$PREFIX/wt.zsh"
+# Main script files (no .zsh extension to match source structure)
+F_WT="$PREFIX/wt"
+F_WTNEW="$PREFIX/wtnew"
+F_WTRM="$PREFIX/wtrm"
+F_WTOPEN="$PREFIX/wtopen"
+F_WTLS="$PREFIX/wtls"
 
-fetch "$REPO_RAW/scripts/wtnew"              "$F_WTNEW"
-fetch "$REPO_RAW/scripts/wtrm"               "$F_WTRM"
-fetch "$REPO_RAW/scripts/wtopen"             "$F_WTOPEN"
-fetch "$REPO_RAW/scripts/wtls"               "$F_WTLS"
-fetch "$REPO_RAW/scripts/lib/wt-common.zsh"  "$F_COMMON"
-fetch "$REPO_RAW/scripts/wt"                 "$F_WT"
+# Library files - ALL of them are required
+F_COMMON="$PREFIX/lib/wt-common.zsh"
+F_RECOVERY="$PREFIX/lib/wt-recovery.zsh"
+F_VALIDATION="$PREFIX/lib/wt-validation.zsh"
+F_DISCOVERY="$PREFIX/lib/wt-discovery.zsh"
+
+# Fetch main scripts
+fetch "$REPO_RAW/scripts/wt"      "$F_WT"
+fetch "$REPO_RAW/scripts/wtnew"   "$F_WTNEW"
+fetch "$REPO_RAW/scripts/wtrm"    "$F_WTRM"
+fetch "$REPO_RAW/scripts/wtopen"  "$F_WTOPEN"
+fetch "$REPO_RAW/scripts/wtls"    "$F_WTLS"
+
+# Fetch ALL library files (modules are required, not optional)
+fetch "$REPO_RAW/scripts/lib/wt-common.zsh"     "$F_COMMON"
+fetch "$REPO_RAW/scripts/lib/wt-recovery.zsh"   "$F_RECOVERY"
+fetch "$REPO_RAW/scripts/lib/wt-validation.zsh" "$F_VALIDATION"
+fetch "$REPO_RAW/scripts/lib/wt-discovery.zsh"  "$F_DISCOVERY"
 
 if [[ -n "$CHECKSUM_FILE" ]] && (( ! DRY_RUN )); then
-  verify_checksums "$CHECKSUM_FILE" "$F_WTNEW" "$F_WTRM" "$F_WTOPEN" "$F_WTLS" "$F_COMMON" "$F_WT"
+  verify_checksums "$CHECKSUM_FILE" \
+    "$F_WT" "$F_WTNEW" "$F_WTRM" "$F_WTOPEN" "$F_WTLS" \
+    "$F_COMMON" "$F_RECOVERY" "$F_VALIDATION" "$F_DISCOVERY"
 fi
 
 add_source_line() {
@@ -198,18 +212,30 @@ add_source_line() {
 }
 
 if (( ! NO_SOURCE )); then
-  add_source_line 'wtnew.zsh'  '[[ -f ~/.zsh/functions/wtnew.zsh ]] && source ~/.zsh/functions/wtnew.zsh'
-  add_source_line 'wtrm.zsh'   '[[ -f ~/.zsh/functions/wtrm.zsh  ]] && source ~/.zsh/functions/wtrm.zsh'
-  add_source_line 'wtopen.zsh' '[[ -f ~/.zsh/functions/wtopen.zsh ]] && source ~/.zsh/functions/wtopen.zsh'
-  add_source_line 'wtls.zsh'   '[[ -f ~/.zsh/functions/wtls.zsh  ]] && source ~/.zsh/functions/wtls.zsh'
-  add_source_line 'wt-common.zsh' '[[ -f ~/.zsh/functions/wt-common.zsh ]] && source ~/.zsh/functions/wt-common.zsh'
-  add_source_line 'wt.zsh'   '[[ -f ~/.zsh/functions/wt.zsh  ]] && source ~/.zsh/functions/wt.zsh'
+  # Source scripts from the new location (they auto-load wt-common.zsh which loads all modules)
+  add_source_line 'git-worktrees/wt' \
+    '[[ -f ~/.zsh/functions/git-worktrees/wt ]] && source ~/.zsh/functions/git-worktrees/wt'
+  add_source_line 'git-worktrees/wtnew' \
+    '[[ -f ~/.zsh/functions/git-worktrees/wtnew ]] && source ~/.zsh/functions/git-worktrees/wtnew'
+  add_source_line 'git-worktrees/wtrm' \
+    '[[ -f ~/.zsh/functions/git-worktrees/wtrm ]] && source ~/.zsh/functions/git-worktrees/wtrm'
+  add_source_line 'git-worktrees/wtopen' \
+    '[[ -f ~/.zsh/functions/git-worktrees/wtopen ]] && source ~/.zsh/functions/git-worktrees/wtopen'
+  add_source_line 'git-worktrees/wtls' \
+    '[[ -f ~/.zsh/functions/git-worktrees/wtls ]] && source ~/.zsh/functions/git-worktrees/wtls'
 fi
 
 # Self-test (non-fatal)
 if (( ! DRY_RUN )); then
   say "Self-test: sourcing functions…"
-  if zsh -fc 'source ~/.zsh/functions/wt-common.zsh; source ~/.zsh/functions/wtnew.zsh; source ~/.zsh/functions/wtopen.zsh; source ~/.zsh/functions/wtrm.zsh; source ~/.zsh/functions/wtls.zsh; source ~/.zsh/functions/wt.zsh; typeset -f wtnew wtopen wtrm wtls wt >/dev/null'; then
+  if zsh -fc '
+    source ~/.zsh/functions/git-worktrees/wt
+    source ~/.zsh/functions/git-worktrees/wtnew
+    source ~/.zsh/functions/git-worktrees/wtrm
+    source ~/.zsh/functions/git-worktrees/wtopen
+    source ~/.zsh/functions/git-worktrees/wtls
+    typeset -f wt wtnew wtrm wtopen wtls >/dev/null
+  '; then
     ok "Commands available: wt, wtnew, wtopen, wtrm, wtls"
   else
     err "Warning: could not verify commands in a subshell. Try: source ~/.zshrc"

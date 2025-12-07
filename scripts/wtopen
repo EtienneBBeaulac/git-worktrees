@@ -1,18 +1,9 @@
 # wtopen: find and open an existing Git worktree for a given branch
-# macOS + zsh/bash friendly. Requires: git, (optional) fzf
+# Requires: git, (optional) fzf
 
-# Resolve script directory and source common helpers at load time (no subshell)
 emulate -L zsh
-setopt pipefail
-typeset -g WTOPEN__SCRIPT_FILE WTOPEN__SCRIPT_DIR WTOPEN__COMMON_LIB
-WTOPEN__SCRIPT_FILE=${(%):-%N}
-if [[ -n $WTOPEN__SCRIPT_FILE && -f $WTOPEN__SCRIPT_FILE ]]; then
-  WTOPEN__SCRIPT_DIR="${WTOPEN__SCRIPT_FILE:A:h}"
-else
-  WTOPEN__SCRIPT_DIR="${0:A:h}"
-fi
-WTOPEN__COMMON_LIB="${WTOPEN__SCRIPT_DIR}/lib/wt-common.zsh"
-[[ -f "$WTOPEN__COMMON_LIB" ]] && source "$WTOPEN__COMMON_LIB" || true
+source "${${(%):-%x}:A:h}/lib/wt-common.zsh" || return 1
+
 wtopen() {
   emulate -L zsh
   setopt local_options pipefail

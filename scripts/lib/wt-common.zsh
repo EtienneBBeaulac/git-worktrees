@@ -1,9 +1,11 @@
 #!/usr/bin/env zsh
-# wt-common: shared helpers for git-worktrees tools (zsh)
+# wt-common.zsh: Core library for git-worktrees
 #
-# GLOBAL STATE DOCUMENTATION:
-# This module uses the following global variables:
-#   - __WT_COMMON_SOURCED: Guard to prevent double-sourcing
+# This is the single entry point for all git-worktrees functionality.
+# All scripts source this file, and it loads all required modules.
+#
+# GLOBAL STATE:
+#   - __WT_LIB_LOADED: Guard to prevent double-sourcing
 #   - __WT_LIB_DIR: Directory containing library files
 #   - WT_VERSION: Current version string
 #   - WT_CONFIG: Associative array of configuration values
@@ -16,12 +18,50 @@
 #   - WT_FZF_OPTS: Additional FZF options
 #   - WT_FAST: Enable fast mode for status display
 
+# ============================================================================
+# Source Guard - Prevent Double Sourcing
+# ============================================================================
+[[ -n ${__WT_LIB_LOADED:-} ]] && return 0
+
 emulate -L zsh
 unsetopt xtrace verbose
-typeset -g __WT_COMMON_SOURCED=1
+
+typeset -g __WT_LIB_LOADED=1
+
+# ============================================================================
+# Determine Library Directory
+# ============================================================================
+# ${(%):-%x} gets the path of THIS file, even when sourced
+# :A makes it absolute, :h gets the directory
+typeset -g __WT_LIB_DIR="${${(%):-%x}:A:h}"
 
 # Version (automatically updated by GitHub Actions on release)
 typeset -g WT_VERSION="1.1.2"
+
+# ============================================================================
+# Load Required Modules
+# ============================================================================
+# These modules are REQUIRED, not optional. If any are missing, the
+# installation is broken and we fail loudly rather than silently degrading.
+
+_wt_require_module() {
+  local module="$1"
+  local path="$__WT_LIB_DIR/$module"
+  if [[ ! -f "$path" ]]; then
+    echo "FATAL: $module not found at $path" >&2
+    echo "       Your git-worktrees installation may be incomplete." >&2
+    echo "       Try reinstalling or check that all lib files are present." >&2
+    return 1
+  fi
+  source "$path" || {
+    echo "FATAL: Failed to source $module" >&2
+    return 1
+  }
+}
+
+_wt_require_module "wt-recovery.zsh" || return 1
+_wt_require_module "wt-validation.zsh" || return 1
+_wt_require_module "wt-discovery.zsh" || return 1
 
 # ============================================================================
 # Centralized Path Functions (Pure - No Mutable Global State)
@@ -71,49 +111,6 @@ wt_get_fzf_height() {
 wt_get_fzf_opts() {
   printf "%s" "${WT_FZF_OPTS:-}"
 }
-
-# ============================================================================
-# Stub Functions for Optional Modules
-# ============================================================================
-# These provide no-op defaults so callers don't need `typeset -f` checks.
-# The actual module implementations override these when loaded.
-
-# Recovery module stubs
-wt_recovery_enabled() { return 1; }
-wt_diagnose_error() { echo "unknown"; }
-wt_error_message() { echo "An error occurred."; }
-wt_offer_recovery() { return 1; }
-wt_transaction_begin() { :; }
-wt_transaction_record() { :; }
-wt_transaction_commit() { :; }
-wt_transaction_rollback() { :; }
-
-# Discovery module stubs
-wt_show_hints() { :; }
-wt_show_contextual_help() { :; }
-
-# Error message stubs (actual implementations below, but define stubs for consistency)
-wt_error_not_git_repo() { echo "❌ Not a git repository" >&2; }
-wt_error_fzf_missing() { echo "⚠️  fzf not found" >&2; }
-
-# Validation module stubs
-wt_fuzzy_match_branch() { return 1; }
-wt_sanitize_branch_name() { printf "%s" "$1"; }
-
-# ============================================================================
-# Load enhanced modules (Phase 1: Core Infrastructure)
-# ============================================================================
-__WT_LIB_DIR="${${(%):-%x}:A:h}"
-
-# Load recovery module (error recovery, retry, transaction log)
-# Note: Module will override stubs defined above
-[[ -f "$__WT_LIB_DIR/wt-recovery.zsh" ]] && source "$__WT_LIB_DIR/wt-recovery.zsh"
-
-# Load validation module (input validation, sanitization, fuzzy matching)
-[[ -f "$__WT_LIB_DIR/wt-validation.zsh" ]] && source "$__WT_LIB_DIR/wt-validation.zsh"
-
-# Load discovery module (help system, hints, cheatsheet)
-[[ -f "$__WT_LIB_DIR/wt-discovery.zsh" ]] && source "$__WT_LIB_DIR/wt-discovery.zsh"
 
 # ============================================================================
 # Structured Worktree Data Type

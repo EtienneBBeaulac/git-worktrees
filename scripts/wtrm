@@ -1,32 +1,8 @@
 # wtrm: safely remove a Git worktree (with fzf picker)
-# Usage:
-#   wtrm                              # pick interactively
-#   wtrm -d /path/to/worktree         # remove by path
-#   wtrm -b feature/xyz               # remove the worktree hosting this branch
-#   wtrm --rm-detached [--yes]        # bulk remove detached worktrees (confirm unless --yes)
-# Options:
-#   -d, --dir <path>          Worktree directory to remove
-#   -b, --branch <name>       Branch whose worktree to remove (if multiple, will prompt)
-#   --delete-branch           Also delete the *local* branch if fully merged into base
-#   --base <ref>              Base to check mergedness (default: origin/main→origin/master→main→master)
-#   --force                   Force removal even if dirty or ahead of upstream
-#   --no-fzf                  Don’t use fzf; prompt fallback if needed
-#   --prune-only              Just run 'git worktree prune' and exit
-#   --rm-detached             Remove all detached worktrees (bulk)
-#   --yes                     Non-interactive confirm (with --rm-detached)
-#   -h, --help                Show help
-# Resolve script directory and source common helpers at load time (no subshell)
+# Requires: git, (optional) fzf
+
 emulate -L zsh
-setopt pipefail
-typeset -g WTRM__SCRIPT_FILE WTRM__SCRIPT_DIR WTRM__COMMON_LIB
-WTRM__SCRIPT_FILE=${(%):-%N}
-if [[ -n $WTRM__SCRIPT_FILE && -f $WTRM__SCRIPT_FILE ]]; then
-  WTRM__SCRIPT_DIR="${WTRM__SCRIPT_FILE:A:h}"
-else
-  WTRM__SCRIPT_DIR="${0:A:h}"
-fi
-WTRM__COMMON_LIB="${WTRM__SCRIPT_DIR}/lib/wt-common.zsh"
-[[ -f "$WTRM__COMMON_LIB" ]] && source "$WTRM__COMMON_LIB" || true
+source "${${(%):-%x}:A:h}/lib/wt-common.zsh" || return 1
 
 wtrm() {
   emulate -L zsh

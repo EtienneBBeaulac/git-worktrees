@@ -1,15 +1,14 @@
 #!/usr/bin/env zsh
-# Wrapper to run wtrm as a CLI when installed to PATH.
+# Wrapper to run wtrm as a CLI command
+# Sources the sibling ../wtrm function file and invokes wtrm
 
 script_dir="${0:A:h}"
 script_root="${script_dir}/.."
 
 if [[ -f "${script_root}/wtrm" ]]; then
   source "${script_root}/wtrm"
-elif [[ -f "${script_root}/../wtrm" ]]; then
-  source "${script_root}/../wtrm"
 else
-  echo "wtrm function file not found. Expected at ${script_root}/wtrm" >&2
+  echo "Error: wtrm not found at ${script_root}/wtrm" >&2
   exit 2
 fi
 
