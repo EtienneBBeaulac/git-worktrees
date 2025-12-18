@@ -36,7 +36,7 @@ typeset -g __WT_LIB_LOADED=1
 typeset -g __WT_LIB_DIR="${${(%):-%x}:A:h}"
 
 # Version (automatically updated by GitHub Actions on release)
-typeset -g WT_VERSION="1.1.2"
+typeset -g WT_VERSION="1.0.2-test"
 
 # ============================================================================
 # Load Required Modules
